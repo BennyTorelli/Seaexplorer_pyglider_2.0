@@ -1,0 +1,11 @@
+point,description,latitude,longitude,expected_land_qc
+1,Ocean - West of La Palma,28.65,-18.1,1
+2,Ocean - East of La Palma,28.65,-17.7,1
+3,Ocean - South of La Palma,28.4,-17.85,1
+4,Ocean - North of La Palma,28.9,-17.85,1
+5,LAND - Center of La Palma,28.65,-17.85,4
+6,LAND - Santa Cruz de La Palma,28.68,-17.76,4
+7,LAND - Los Llanos,28.66,-17.91,4
+8,LAND - Fuencaliente (south tip),28.5,-17.83,4
+9,LAND - Punta Cumplida (north),28.82,-17.75,4
+10,Ocean - Near coast but outside,28.7,-18.02,1

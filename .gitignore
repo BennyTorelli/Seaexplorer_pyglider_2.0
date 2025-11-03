@@ -1,0 +1,14 @@
+.DS_Store
+.python-version
+__pycache__/
+pyproject.toml
+uv.lock
+
+output/
+output_old/
+input/sanitized/
+input/raw/
+input/pld/
+input/nav/
+input_febrero
+output_febrero
