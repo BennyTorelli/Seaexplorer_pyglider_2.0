@@ -134,9 +134,17 @@ def range_qc_variable(ds: xr.Dataset, varname: str,
 
 
 def range_qc_time(ds: xr.Dataset, time_coord: str = 'TIME') -> xr.Dataset:
-    """Apply range QC to time coordinate.
+    """Apply granular QC to time coordinate.
 
-    Checks if timestamps are within valid range: 1950-01-01 to current date.
+    Validates each component of the timestamp:
+    - Year: >= 1990 and <= current year
+    - Month: between 1 and 12
+    - Day: valid for the given month (accounts for leap years)
+    - Hour: between 0 and 23
+    - Minute: between 0 and 59
+    - Second: between 0 and 59
+    
+    If ANY condition fails, the timestamp is marked as FAIL (flag 4).
     
     Args:
         ds: xarray.Dataset containing the time coordinate.
@@ -147,6 +155,7 @@ def range_qc_time(ds: xr.Dataset, time_coord: str = 'TIME') -> xr.Dataset:
     """
     import pandas as pd
     from datetime import datetime
+    import calendar
     
     # Find time coordinate (case-insensitive)
     time_var = None
@@ -158,9 +167,10 @@ def range_qc_time(ds: xr.Dataset, time_coord: str = 'TIME') -> xr.Dataset:
     if time_var is None:
         raise KeyError(f"Time coordinate '{time_coord}' not found in dataset")
     
-    # Define valid time range
-    min_time = pd.Timestamp('1950-01-01')
-    max_time = pd.Timestamp(datetime.now())  # Current date at execution time
+    # Get current date for upper limit
+    now = datetime.now()
+    current_year = now.year
+    current_date = pd.Timestamp(now)
     
     time_values = pd.to_datetime(ds[time_var].values)
     flags = np.full(time_values.shape, np.nan, dtype=float)  # NaN for missing
@@ -169,8 +179,52 @@ def range_qc_time(ds: xr.Dataset, time_coord: str = 'TIME') -> xr.Dataset:
     valid_mask = pd.notna(time_values)
     if valid_mask.any():
         valid_times = time_values[valid_mask]
-        # Check range: pass=1, fail=4 (only for present values)
-        pass_mask = (valid_times >= min_time) & (valid_times <= max_time)
+        
+        # Extract components
+        years = valid_times.year
+        months = valid_times.month
+        days = valid_times.day
+        hours = valid_times.hour
+        minutes = valid_times.minute
+        seconds = valid_times.second
+        
+        # Initialize pass mask (all True, then apply conditions)
+        pass_mask = np.ones(len(valid_times), dtype=bool)
+        
+        # Check each condition
+        # 1. Year: >= 1990 and <= current year
+        pass_mask &= (years >= 1990) & (years <= current_year)
+        
+        # 2. For timestamps in current year, check they're not in the future
+        current_year_mask = (years == current_year)
+        if current_year_mask.any():
+            pass_mask[current_year_mask] &= (valid_times[current_year_mask] <= current_date)
+        
+        # 3. Month: between 1 and 12
+        pass_mask &= (months >= 1) & (months <= 12)
+        
+        # 4. Day: valid for the given month (considering leap years)
+        for i in range(len(valid_times)):
+            if pass_mask[i]:  # Only check if not already failed
+                try:
+                    # Check if the day is valid for the given year/month
+                    max_day = calendar.monthrange(years[i], months[i])[1]
+                    if not (1 <= days[i] <= max_day):
+                        pass_mask[i] = False
+                except (ValueError, calendar.IllegalMonthError):
+                    # Invalid month or other calendar error
+                    pass_mask[i] = False
+        
+        # 5. Hour: between 0 and 23
+        pass_mask &= (hours >= 0) & (hours <= 23)
+        
+        # 6. Minute: between 0 and 59
+        pass_mask &= (minutes >= 0) & (minutes <= 59)
+        
+        # 7. Second: between 0 and 59
+        pass_mask &= (seconds >= 0) & (seconds <= 59)
+        
+        # Assign flags: 1=PASS, 4=FAIL
         flags[valid_mask] = np.where(pass_mask, 1, 4)
     
     qc_name = 'TIME_qc'
@@ -179,14 +233,127 @@ def range_qc_time(ds: xr.Dataset, time_coord: str = 'TIME') -> xr.Dataset:
         'flag_values': np.array([1, 4], dtype=np.int8),
         'flag_meanings': 'pass fail',
         'units': '1',
-        'method': 'range check',
+        'method': 'granular component validation',
         'valid_min': 1,
         'valid_max': 4,
-        'comment': f'Valid range: 1950-01-01 to {max_time.strftime("%Y-%m-%d")}. Flag 4 indicates out of range. Missing values have no flag.',
+        'comment': (
+            f'Granular timestamp validation. Valid if ALL conditions are met: '
+            f'year >= 1990 and <= {current_year}, month 1-12, day valid for month, '
+            f'hour 0-23, minute 0-59, second 0-59. '
+            f'Flag 4 indicates any component out of range. Missing values have no flag.'
+        ),
     }
     
     ds[qc_name] = (ds[time_var].dims, flags, attrs)
-    _log.info('Applied time QC: valid range 1950-01-01 to %s', max_time.strftime('%Y-%m-%d'))
+    _log.info('Applied granular time QC: year >= 1990 and <= %d, all components validated', current_year)
+    return ds
+
+
+def calculate_velocity(ds: xr.Dataset) -> xr.Dataset:
+    """Calculate glider glide velocity from vertical velocity (W) and pitch angle.
+    
+    Formula: VELOCITY = (W / sin(pitch)) * 100
+    where:
+        - W = vertical velocity (m/s) = dDEPTH / dTIME
+        - pitch = glider pitch angle (degrees)
+        - VELOCITY is returned in cm/s
+    
+    The function adds a new variable 'VELOCITY' to the dataset.
+    
+    Args:
+        ds: xarray.Dataset containing TIME, DEPTH (or PRES), and pitch variables
+        
+    Returns:
+        Dataset with added 'VELOCITY' variable (cm/s)
+    """
+    # Check required variables
+    if 'TIME' not in ds.coords and 'time' not in ds.coords:
+        _log.warning("TIME coordinate not found, cannot calculate VELOCITY")
+        return ds
+    
+    # Find depth variable (DEPTH or depth)
+    depth_var = None
+    if 'DEPTH' in ds.coords:
+        depth_var = 'DEPTH'
+    elif 'depth' in ds.coords:
+        depth_var = 'depth'
+    elif 'DEPTH' in ds:
+        depth_var = 'DEPTH'
+    elif 'depth' in ds:
+        depth_var = 'depth'
+    
+    if depth_var is None:
+        _log.warning("DEPTH variable not found, cannot calculate VELOCITY")
+        return ds
+    
+    # Find pitch variable
+    pitch_var = None
+    if 'pitch' in ds:
+        pitch_var = 'pitch'
+    elif 'PITCH' in ds:
+        pitch_var = 'PITCH'
+    
+    if pitch_var is None:
+        _log.warning("pitch variable not found, cannot calculate VELOCITY")
+        return ds
+    
+    # Extract arrays
+    time_vals = ds['TIME'].values if 'TIME' in ds.coords else ds['time'].values
+    depth_vals = ds[depth_var].values
+    pitch_vals = ds[pitch_var].values
+    
+    n = len(depth_vals)
+    velocity = np.full(n, np.nan, dtype=float)
+    
+    # Calculate velocity for each point (skip first point since we need i-1)
+    for i in range(1, n):
+        depth_curr = depth_vals[i]
+        depth_prev = depth_vals[i-1]
+        pitch_curr = pitch_vals[i]
+        
+        # Check for missing data
+        if np.isnan(depth_curr) or np.isnan(depth_prev) or np.isnan(pitch_curr):
+            velocity[i] = np.nan
+            continue
+        
+        # Calculate time difference in seconds
+        time_curr = pd.Timestamp(time_vals[i])
+        time_prev = pd.Timestamp(time_vals[i-1])
+        dt_seconds = (time_curr - time_prev).total_seconds()
+        
+        if dt_seconds <= 0:
+            velocity[i] = np.nan
+            continue
+        
+        # Calculate vertical velocity W (m/s)
+        W = (depth_curr - depth_prev) / dt_seconds
+        
+        # Convert pitch to radians
+        pitch_rad = np.radians(pitch_curr)
+        
+        # Calculate glide velocity: V = W / sin(pitch)
+        # No filtering: always calculate even if sin(pitch) is small
+        sin_pitch = np.sin(pitch_rad)
+        
+        if sin_pitch == 0:
+            velocity[i] = np.nan  # Avoid division by zero (should be rare)
+        else:
+            # Calculate velocity in m/s, then convert to cm/s
+            v_ms = W / sin_pitch
+            # Use absolute value: VELOCITY is always positive (speed)
+            # PITCH indicates direction (negative=descent, positive=ascent)
+            velocity[i] = abs(v_ms) * 100.0  # Convert to cm/s
+    
+    # Add VELOCITY to dataset as a new variable
+    ds['VELOCITY'] = (ds[depth_var].dims, velocity, {
+        'long_name': 'Glider glide velocity',
+        'standard_name': 'platform_speed_wrt_sea_water',
+        'units': 'cm/s',
+        'comment': 'Calculated from vertical velocity (dDEPTH/dTIME) and pitch angle: VELOCITY = (W / sin(pitch)) * 100'
+    })
+    
+    _log.info(f"Calculated VELOCITY from DEPTH and pitch: mean={np.nanmean(velocity):.2f} cm/s, std={np.nanstd(velocity):.2f} cm/s")
+    
     return ds
 
 
@@ -305,6 +472,9 @@ def export_qc_to_csv(ds: xr.Dataset, varname: str = None, csv_path: str = None):
     where QC/temperature uses the lowercase legacy label you requested.
     The function auto-detects `TEMP` vs `temperature` when `varname` is None.
     """
+    # Calculate VELOCITY from DEPTH and pitch before any QC processing
+    ds = calculate_velocity(ds)
+    
     # Apply TIME QC first
     ds = range_qc_time(ds)
     
@@ -643,7 +813,7 @@ def export_qc_to_csv(ds: xr.Dataset, varname: str = None, csv_path: str = None):
         compact['LAND_QC'] = ''
 
     # merge in requested variable values so QC can be inspected alongside
-    value_vars = ['LATITUDE', 'LONGITUDE', 'TEMP', 'CNDC', 'PRES', 'CHLA', 'TURB', 'DOXY', 'PSAL', 'potential_density']
+    value_vars = ['LATITUDE', 'LONGITUDE', 'TEMP', 'CNDC', 'PRES', 'CHLA', 'TURB', 'DOXY', 'PSAL', 'potential_density', 'pitch', 'VELOCITY']
     present = [v for v in value_vars if v in ds]
     
     # Also check for legacy 'temperature' and treat it as 'TEMP'
@@ -682,6 +852,11 @@ def export_qc_to_csv(ds: xr.Dataset, varname: str = None, csv_path: str = None):
         if 'potential_density' in df_vals.columns:
             df_vals = df_vals.rename(columns={'potential_density': 'POTDEN'})
             _log.info("Renamed potential_density to POTDEN for standardization")
+        
+        # Rename 'pitch' to 'PITCH' for standardization
+        if 'pitch' in df_vals.columns:
+            df_vals = df_vals.rename(columns={'pitch': 'PITCH'})
+            _log.info("Renamed pitch to PITCH for standardization")
         
         # merge values into compact by time
         compact = compact.merge(df_vals, on='time', how='left')
@@ -805,17 +980,17 @@ def export_qc_to_csv(ds: xr.Dataset, varname: str = None, csv_path: str = None):
     # NOTE: If neighbors are NaN, the algorithm searches further back/forward to find valid values
     
     def spike_qc_negative_5point(values, var_name):
-        """Negative spike test using flexible 5-point median for CHLA and TURB.
+        """Negative spike test using strict 5-point median for CHLA and TURB.
         
-        This function uses a flexible window: if a neighbor value is NaN, it searches
-        further back or forward to find valid values for the median calculation.
+        This function uses a strict window: only the immediate 4 neighbors (i-2, i-1, i+1, i+2)
+        are used. If ANY of these 4 neighbors is NaN, the central value gets flag 0 (NOT EVALUATED).
         
         Args:
             values: numpy array of variable values
             var_name: variable name for logging
         
         Returns:
-            numpy array of QC flags (0, 1, 4, 9)
+            numpy array of QC flags (0, 1, 4)
         """
         n = len(values)
         qc_flags = np.full(n, 0, dtype=int)  # Initialize with 0 (not evaluated)
@@ -824,63 +999,31 @@ def export_qc_to_csv(ds: xr.Dataset, varname: str = None, csv_path: str = None):
             _log.warning(f"Negative spike QC for {var_name}: dataset has < 5 points, all flagged as 0")
             return qc_flags
         
-        def find_valid_neighbors(idx, values, n_before=2, n_after=2):
-            """Find valid (non-NaN) neighbors around index idx.
-            
-            Args:
-                idx: current index
-                values: array of values
-                n_before: number of valid values needed before idx
-                n_after: number of valid values needed after idx
-            
-            Returns:
-                tuple: (list of values before, list of values after) or (None, None) if not enough found
-            """
-            before_vals = []
-            after_vals = []
-            
-            # Search backwards for n_before valid values
-            search_idx = idx - 1
-            while len(before_vals) < n_before and search_idx >= 0:
-                if not np.isnan(values[search_idx]):
-                    before_vals.insert(0, values[search_idx])  # Insert at beginning to maintain order
-                search_idx -= 1
-            
-            # Search forwards for n_after valid values
-            search_idx = idx + 1
-            while len(after_vals) < n_after and search_idx < len(values):
-                if not np.isnan(values[search_idx]):
-                    after_vals.append(values[search_idx])
-                search_idx += 1
-            
-            # Return None if we couldn't find enough valid values
-            if len(before_vals) < n_before or len(after_vals) < n_after:
-                return None, None
-            
-            return before_vals, after_vals
-        
-        # Step 1: Calculate RES for all valid observations
+        # Step 1: Calculate RES for all valid observations with valid neighbors
         res_list = []
         res_indices = []
         
         for i in range(2, n - 2):  # Skip first 2 and last 2
-            V2 = values[i]  # Current value
+            V2 = values[i]  # Current value (center)
             
             # If V2 itself is missing, mark as not evaluated (0)
             if np.isnan(V2):
                 qc_flags[i] = 0  # NOT EVALUATED (missing data)
                 continue
             
-            # Find valid neighbors (2 before, 2 after)
-            before_vals, after_vals = find_valid_neighbors(i, values, n_before=2, n_after=2)
+            # Get the 4 immediate neighbors (strict window)
+            V0 = values[i - 2]  # 2 positions before
+            V1 = values[i - 1]  # 1 position before
+            V3 = values[i + 1]  # 1 position after
+            V4 = values[i + 2]  # 2 positions after
             
-            # If we couldn't find enough valid neighbors, mark as not evaluated (0)
-            if before_vals is None or after_vals is None:
-                qc_flags[i] = 0  # NOT EVALUATED (not enough valid neighbors)
+            # If ANY of the 4 neighbors is NaN, mark as not evaluated (0)
+            if np.isnan(V0) or np.isnan(V1) or np.isnan(V3) or np.isnan(V4):
+                qc_flags[i] = 0  # NOT EVALUATED (neighbor is NaN)
                 continue
             
-            # Calculate RES = V2 - median(before_vals + [V2] + after_vals)
-            window_values = before_vals + [V2] + after_vals
+            # All neighbors are valid, calculate RES = V2 - median([V0, V1, V2, V3, V4])
+            window_values = [V0, V1, V2, V3, V4]
             median_val = np.median(window_values)
             res = V2 - median_val
             res_list.append(res)
@@ -1326,6 +1469,40 @@ def export_qc_to_csv(ds: xr.Dataset, varname: str = None, csv_path: str = None):
         _log.info('PRES not available, Stuck Values QC set to 0')
 
     # ------------------------------------------------------------------
+    # VELOCITY QC: Check if glide velocity is physically realistic
+    # Maximum expected velocity = 350 cm/s (strong currents) + 51 cm/s (glider speed) = 401 cm/s
+    # Flag 1 (PASS): VELOCITY <= 401 cm/s
+    # Flag 4 (FAIL): VELOCITY > 401 cm/s (position or time error)
+    # Flag 0 (NOT_EVALUATED): VELOCITY is NaN
+    # ------------------------------------------------------------------
+    if 'VELOCITY' in compact.columns:
+        velocity_vals = compact['VELOCITY'].values
+        n = len(velocity_vals)
+        velocity_qc = np.zeros(n, dtype=int)
+        max_velocity = 401.0  # cm/s (350 currents + 51 glider)
+        
+        for i in range(n):
+            vel = velocity_vals[i]
+            if np.isnan(vel):
+                velocity_qc[i] = 0  # NOT_EVALUATED
+            elif vel <= max_velocity:
+                velocity_qc[i] = 1  # PASS
+            else:
+                velocity_qc[i] = 4  # FAIL (unrealistic velocity)
+        
+        compact['VELOCITY_QC'] = velocity_qc
+        
+        # Log statistics
+        n_pass = np.sum(velocity_qc == 1)
+        n_fail = np.sum(velocity_qc == 4)
+        n_not_eval = np.sum(velocity_qc == 0)
+        _log.info(f'Applied VELOCITY QC: threshold={max_velocity} cm/s')
+        _log.info(f'VELOCITY QC results: {n_pass} PASS, {n_fail} FAIL (unrealistic), {n_not_eval} NOT_EVALUATED')
+    else:
+        compact['VELOCITY_QC'] = 0
+        _log.info('VELOCITY not available, VELOCITY_QC set to 0')
+
+    # ------------------------------------------------------------------
     # SURFACE QC for CHLA and TURB
     # If PRES <= 5 dbar -> flag 4 (bad at surface), else flag 1 (reasonable)
     # If PRES missing or variable missing -> flag 0 (not evaluated)
@@ -1367,7 +1544,7 @@ def export_qc_to_csv(ds: xr.Dataset, varname: str = None, csv_path: str = None):
         compact['TURB_Surface_QC'] = 0
         _log.info('TURB or PRES not available, TURB_Surface_QC set to 0')
 
-    # For column ordering, replace 'temperature' and 'salinity' with standardized names
+    # For column ordering, replace 'temperature', 'salinity', 'pitch' and 'potential_density' with standardized names
     present_standardized = []
     for v in present:
         if v == 'salinity':
@@ -1376,6 +1553,8 @@ def export_qc_to_csv(ds: xr.Dataset, varname: str = None, csv_path: str = None):
             present_standardized.append('TEMP')
         elif v == 'potential_density':
             present_standardized.append('POTDEN')
+        elif v == 'pitch':
+            present_standardized.append('PITCH')
         else:
             present_standardized.append(v)
     
@@ -1391,7 +1570,11 @@ def export_qc_to_csv(ds: xr.Dataset, varname: str = None, csv_path: str = None):
             # If variable doesn't exist, leave Na_QC column empty
             compact[na_qc_col] = ''
     
-    # reorder columns to TIME, DEPTH, requested values, then Range_QC columns, then Na_QC columns, then Sensor_QC, then LAND_QC, then Spike_QC, then Gradient_QC
+    # Add PITCH column (renamed from 'pitch' to 'PITCH')
+    if 'pitch' in compact.columns and 'PITCH' not in compact.columns:
+        compact['PITCH'] = compact['pitch']
+    
+    # reorder columns to TIME, DEPTH, requested values (including PITCH from present_standardized), then Range_QC columns, then Na_QC columns, then Sensor_QC, then LAND_QC, then Spike_QC, then Gradient_QC
     range_qc_cols = ['Date_QC', 'Location_QC', 'TEMP_Range_QC', 'CNDC_Range_QC', 'CHLA_Range_QC', 'TURB_Range_QC', 'DOXY_Range_QC', 'PSAL_Range_QC']
     na_qc_cols = ['TEMP_Na_QC', 'CNDC_Na_QC', 'DOXY_Na_QC', 'CHLA_Na_QC', 'TURB_Na_QC']
     sensor_qc_cols = ['TEMP_Sensor_QC', 'CNDC_Sensor_QC', 'DOXY_Sensor_QC', 'CHLA_Sensor_QC', 'TURB_Sensor_QC']
@@ -1403,15 +1586,16 @@ def export_qc_to_csv(ds: xr.Dataset, varname: str = None, csv_path: str = None):
     density_qc_cols = ['TEMP_Density_QC', 'PRES_Density_QC', 'PSAL_Density_QC']
     increasing_qc_cols = ['PRES_Increasing_QC']
     stuck_qc_cols = ['TEMP_Stuck_QC', 'CNDC_Stuck_QC', 'DOXY_Stuck_QC', 'CHLA_Stuck_QC', 'TURB_Stuck_QC']
-    # Order: ... spike QC, surface QC, gradient QC, PRES_Max_QC, Density QC, PRES_Increasing_QC, then Stuck Values QC
-    cols = ['time', 'depth'] + present_standardized + range_qc_cols + na_qc_cols + sensor_qc_cols + land_qc_cols + spike_qc_cols + surface_qc_cols + gradient_qc_cols + pres_qc_cols + density_qc_cols + increasing_qc_cols + stuck_qc_cols
+    velocity_qc_cols = ['VELOCITY_QC']
+    # Order: TIME, DEPTH, data variables (including PITCH), then Range_QC columns, then Na_QC, then Sensor_QC, then LAND_QC, then Spike_QC, then Gradient_QC, etc.
+    cols = ['time', 'depth'] + present_standardized + range_qc_cols + na_qc_cols + sensor_qc_cols + land_qc_cols + spike_qc_cols + surface_qc_cols + gradient_qc_cols + pres_qc_cols + density_qc_cols + increasing_qc_cols + stuck_qc_cols + velocity_qc_cols
     # keep only columns that exist in compact
     cols = [c for c in cols if c in compact.columns]
     compact = compact[cols]
 
     # Convert all QC flag columns: replace NaN (and empty strings) with 0 for QC-only columns
     # We target only the QC columns (range, sensor, spike, gradient, date/location, LAND_QC)
-    qc_columns = range_qc_cols + sensor_qc_cols + spike_qc_cols + surface_qc_cols + gradient_qc_cols + pres_qc_cols + density_qc_cols + increasing_qc_cols + stuck_qc_cols + land_qc_cols + ['Date_QC', 'Location_QC']
+    qc_columns = range_qc_cols + sensor_qc_cols + spike_qc_cols + surface_qc_cols + gradient_qc_cols + pres_qc_cols + density_qc_cols + increasing_qc_cols + stuck_qc_cols + velocity_qc_cols + land_qc_cols + ['Date_QC', 'Location_QC']
     for col in qc_columns:
         if col in compact.columns:
             # Normalize empty strings to NaN, then fill NaN with 0 (not evaluated/missing)

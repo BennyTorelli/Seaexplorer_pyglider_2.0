@@ -126,47 +126,67 @@ The complete processing workflow is orchestrated by a master script, `MASTER_pyg
 1.  **CSV Export:** The fully processed netCDF file is exported to a CSV file (`seaexplorer_data_complete.csv`). This format is easily accessible for users who may not be familiar with netCDF or `xarray`.
 2.  **Variable Standardization:** A mapping is applied to rename all variables to a consistent, uppercase convention (e.g., `temperature` becomes `TEMP`, `oxygen_concentration` becomes `DOXY`). This aligns with conventions used in major oceanographic databases (e.g., Argo). The final, standardized files are saved with a `_standard_names` suffix.
 
-### 2.5 The Multi-Tier Quality Control Framework
+---
 
-Parallel to the processing pipeline, a comprehensive QC script (`scripts/qc_variables.py`) is run to generate a detailed quality assessment for each data point. This framework is designed to be both exhaustive and transparent, producing a set of flags that can be used to filter data for scientific analysis. The philosophy is to flag, not remove, data, allowing the end-user to make informed decisions. We use a simplified Argo flagging scheme: **1 (good)**, **4 (bad)**, **9 (missing)**, and **0 (not evaluated)**.
+## 3. The Multi-Tier Quality Control Framework: Ensuring Data Integrity
 
-Here we provide a discursive overview of the key QC tests.
+The generation of a standardized, TEOS-10 compliant dataset is only the first step. The true scientific value of glider data is unlocked only after a rigorous and transparent assessment of its quality. Data from autonomous platforms are susceptible to a myriad of issues, from sensor biofouling and calibration drift to environmental contamination and electronic noise. Failure to identify and flag these issues can lead to erroneous scientific conclusions.
 
-#### 2.5.1 Foundational Checks: Time, Position, and Missing Data
+Therefore, a systematic Quality Control (QC) process is not an optional post-processing step but a fundamental component of the data life cycle. The philosophy of our framework is to **flag, not remove**, providing the end-user with a comprehensive set of indicators to make informed decisions. This approach preserves the original data while offering clear guidance on its reliability.
 
-*   **Temporal QC (`Date_QC`):** A basic sanity check to ensure timestamps are plausible (e.g., not in the future or before the glider era).
-*   **Geographic QC (`Location_QC`):** A "bounding box" test to ensure the glider's reported position is within the expected operational area for the mission.
-*   **Missing Value QC (`Na_QC`):** A simple but vital test that flags every `NaN` (Not a Number) value with a `9`. This explicitly distinguishes missing data from measured data.
+Our pipeline executes a dedicated QC script (`scripts/qc_variables.py`) that applies a battery of tests to the processed data. To ensure interoperability with global data systems like Argo and EMODnet, we use a simplified version of the **IODE/ARGO QC flag scheme**:
 
-#### 2.5.2 Range Checks: From Sensor Limits to Climatology
+*   **1 (GOOD):** The data point has passed all relevant QC tests and is considered reliable.
+*   **4 (BAD):** The data point has failed at least one critical QC test and is considered erroneous or highly suspect.
+*   **9 (MISSING):** The data point was not recorded or is unavailable (`NaN`).
+*   **0 (NOT EVALUATED):** A specific QC test was not performed on the data point, often due to missing contextual data (e.g., at the edge of a profile).
 
-*   **Sensor Range QC (`Sensor_QC`):** This test compares each data point against the absolute physical limits of the sensor, as specified by the manufacturer (e.g., the SBE 41CP CTD cannot report a temperature of 50°C). A value outside this range indicates a critical sensor or data transmission failure.
-*   **Climatological Range QC (`Range_QC`):** This is a stricter test that compares data against the expected oceanographic range for the specific region (La Palma). For example, while the temperature sensor *can* read 5°C, this value would be highly anomalous for the surface waters of the Canary Islands and would thus be flagged. These ranges are defined based on historical data and regional expertise.
+The following sections provide a detailed, test-by-test description of the framework, from foundational checks to advanced, platform-specific diagnostics.
 
-#### 2.5.3 Coastal Proximity QC (LAND_QC) - A Novel Contribution
+### 3.1 Foundational Checks: Time, Position, and Data Gaps
 
-**Scientific Rationale:** A glider is an open-ocean instrument and cannot operate on land. A reported position inside a landmass is an unequivocal error, likely from a faulty GPS fix or a dead-reckoning error.
+These initial tests form the bedrock of the QC process, ensuring that the data has a valid temporal and spatial context.
 
-**Method:** We developed an automated coastal proximity detector that provides a definitive check.
-1.  A high-resolution coastline polygon for La Palma is loaded from a shapefile.
-2.  For each data point, the `shapely` library is used to perform a point-in-polygon test.
-3.  If the glider's (lon, lat) coordinate falls *inside* the land polygon, it is flagged as **bad (4)**. Otherwise, it is flagged as **good (1)**.
+*   **Granular Temporal QC (`Date_QC`):** A robust check on the integrity of the timestamp is performed. Our enhanced methodology moves beyond a simple range check to a **granular validation** of each component of the timestamp. For every data point, the pipeline verifies:
+    *   **Year:** Plausible range (> 1990 and not in the future).
+    *   **Month:** Valid range (1-12).
+    *   **Day:** Valid for the given month and year, correctly handling leap years.
+    *   **Hour, Minute, Second:** Within their valid ranges (0-23, 0-59, 0-59).
+    This fine-grained approach is critical for detecting subtle data corruption or formatting errors that a coarse bounding box might miss, ensuring the temporal accuracy required for calculating derived parameters like velocity.
 
-This method is computationally efficient and far more accurate than a simple bounding box, especially for missions near complex coastlines.
+*   **Geographic QC (`Location_QC`):** A "bounding box" test to ensure the glider's reported latitude and longitude are within the expected operational area for the mission (e.g., the Canary Islands region). This is a first-pass check to catch gross position errors.
 
-#### 2.5.4 Advanced Anomaly Detection Tests
+*   **Coastal Proximity QC (`LAND_QC`):** A more sophisticated spatial test, critical for coastal missions. This test uses a high-resolution shoreline shapefile (in this case, for La Palma) to determine if a glider's reported position is physically on land. It calculates the distance to the nearest coast and flags any point located within the land polygon as **bad (4)**. This prevents the erroneous interpretation of data collected while the glider may have been grounded or reporting inaccurate GPS fixes near the coast.
 
-Our framework includes several advanced tests designed to catch more subtle or transient errors common in glider data.
+*   **Missing Value QC (`Na_QC`):** A simple but vital test that flags every `NaN` (Not a Number) value with a `9`. This explicitly distinguishes missing data from measured data and ensures that data gaps are not misinterpreted.
 
-*   **Spike Detection (`Spike_QC`):** We use two different spike tests.
-    1.  **For physical variables (TEMP, PSAL, DOXY):** A test adapted from QARTOD that uses a 3-point running window to identify points that represent an abrupt, non-physical deviation from the local gradient.
-    2.  **For bio-optical variables (CHLA, TURB):** A novel 5-point median-based filter designed to detect the transient *negative* spikes common in fluorescence data, which are often caused by bubbles or sensor blockages.
+### 3.2 Sensor and Environmental QC: From Plausibility to Dynamics
 
-*   **Density Inversion QC:** This test checks for hydrostatic instability. In a stable ocean, density should increase with depth. The test uses the TEOS-10 calculated density and flags any data points where a significant parcel of lighter water is found beneath denser water. Such an inversion in glider data is almost always indicative of a problem with the CTD sensor, particularly the conductivity cell.
+This tier of tests scrutinizes the sensor data itself, checking for physical plausibility, sensor malfunctions, and environmental contamination.
 
-*   **Stuck Value QC:** This test identifies if a sensor is "stuck," meaning it reports the exact same value for an extended period (e.g., an entire profile). It checks if all valid measurements within a single profile segment are identical and flags the entire segment if they are.
+*   **Regional Range Test (`{VAR}_Range_QC`):** This test has been specifically tailored for the mission area. Instead of a generic "global" range, we apply a **regional climatological check** based on known oceanographic conditions around the Canary Islands. For each variable (e.g., `TEMP`, `PSAL`), we define a plausible range derived from historical data (e.g., World Ocean Atlas) and expert knowledge of the region. For example, temperature values are expected to fall within a specific range characteristic of the North Atlantic Central Water. A value falling outside this regional box is flagged as **bad (4)**. This is more powerful than a global test as it can detect anomalous values that might still be globally plausible but are unrealistic for the specific study area.
 
-*   **Surface Contamination QC (for Bio-optics):** Bio-optical measurements in the top few meters can be contaminated by bubbles from the glider's submersion or affected by non-photochemical quenching (NPQ) in high sunlight. This test prophylactically flags all `CHLA` and `TURB` data collected at pressures less than 5 dbar (~5 meters depth) as potentially unreliable.
+*   **Stuck Value Test (`{VAR}_Stuck_QC`):** This test is a crucial diagnostic for sensor failure. It identifies situations where a sensor reports the exact same value for a prolonged period within a single profile (ascent or descent). The script segments the data into profiles based on pressure changes and then checks for constant, non-`NaN` values within each segment. If found, all points in that segment for that variable are flagged as **bad (4)**, as this indicates a "stuck" sensor that is no longer responding to environmental changes.
+
+*   **Spike Test (3-Point Median for Physical Sensors):** A standard test for physical variables (`TEMP`, `PSAL`, `POTDEN`) that flags a point if it represents a significant, non-physical deviation from its two immediate neighbors. A point `p(i)` is flagged as a spike if `|p(i) - median(p(i-1), p(i), p(i+1))|` exceeds a pre-defined threshold. This is effective at catching transient electronic noise.
+
+*   **Derived Velocity and Physical Plausibility (`VELOCITY_QC`):** A significant enhancement to our pipeline is the calculation and quality control of the glider's vertical speed. This serves as a powerful diagnostic for both data quality and glider performance.
+    *   **Calculation:** The vertical velocity (`W`) is first calculated as the rate of change of depth over time (`dDEPTH/dTIME`). This is then converted to the glider's speed through the water (`VELOCITY`) by correcting for the glider's pitch angle (`PITCH`), which is recorded by the glider's internal flight computer. The formula is:
+        $$ VELOCITY_{cm/s} = \left| \frac{dDEPTH/dTIME}{\sin(\text{PITCH}_{\text{radians}})} \right| \times 100 $$
+        The absolute value is used to represent speed as a positive quantity, irrespective of ascent or descent. The `PITCH` variable itself is also included in the final data product, providing valuable context on the glider's flight characteristics.
+    *   **Quality Control:** A physical plausibility test is applied to the calculated `VELOCITY`. A data point is flagged as **bad (4)** if the speed exceeds a threshold of **401 cm/s**. This threshold is derived from a conservative estimate of the maximum possible speed, considering the glider's own maximum propulsion speed (approx. 51 cm/s) and the most extreme ocean currents ever recorded (e.g., Gulf Stream, Kuroshio, at approx. 350 cm/s). Speeds exceeding this limit are considered physically unrealistic and likely indicate issues with the underlying `DEPTH`, `TIME`, or `PITCH` data points used in the calculation.
+
+### 3.3 Bio-Optical Sensor QC: Advanced Spike and Contamination Detection
+
+Bio-optical sensors, such as those measuring Chlorophyll-a (`CHLA`) and Turbidity (`TURB`), are inherently noisier than CTD sensors. They are prone to significant, sharp spikes caused by encounters with marine aggregates, large plankton, or internal sensor noise. This requires a more specialized set of QC tests.
+
+*   **Negative Value Test:** A fundamental check that flags any non-physical negative readings from these sensors as **bad (4)**. This is often indicative of a calibration issue or an incorrect dark count offset.
+
+*   **Enhanced Spike Test (5-Point Strict Median):** To handle the specific noise characteristics of these sensors, we have implemented a more robust spike detection algorithm that differs from the one used for physical sensors.
+    *   **Methodology:** This test uses a 5-point median filter. A point `p(i)` is evaluated against the median of a window including its two preceding and two succeeding neighbors: `median(p(i-2), p(i-1), p(i), p(i+1), p(i+2))`. A wider window is used to better capture the baseline signal around potentially noisy spikes.
+    *   **Strict Neighbor Requirement:** A crucial enhancement is our strict handling of `NaN` values within the moving window. If **any** of the four neighbors (`p(i-2)`, `p(i-1)`, `p(i+1)`, `p(i+2)`) is `NaN`, the central point `p(i)` is not evaluated and flagged as **0 (not evaluated)**. This prevents the erroneous flagging of data points at the edges of data gaps, ensuring that spikes are only identified when there is a continuous, high-quality local context. This strictness significantly reduces false positives compared to more lenient methods that might interpolate across gaps.
+
+*   **Surface Contamination QC (for Bio-optics):** Bio-optical measurements in the top few meters of the water column are highly susceptible to contamination. This can be caused by bubbles injected during the glider's submersion, interference from surface wave action, or biological phenomena like non-photochemical quenching (NPQ) in high sunlight. To account for this, this test prophylactically flags all `CHLA` and `TURB` data collected at pressures less than 5 dbar (~5 meters depth) as **bad (4)**. While this is a conservative measure, it ensures that data used for primary productivity or water clarity studies are free from near-surface artifacts.
 
 ### 2.6 Final Output Products
 
