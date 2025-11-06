@@ -23,7 +23,7 @@ We use a simple flagging system based on the international Argo program. Every d
 |------|------|-------------|----------------|
 | **1** | **GOOD** | The data point has passed the test. | Data is considered reliable for this specific test. |
 | **4** | **BAD** | The data point has failed the test. | Data is considered erroneous or highly suspect. **Action:** You should probably exclude this data point from your analysis. |
-| **9** | **MISSING** | The data point was not recorded (`NaN`). | Represents a data gap. This is not an error, just an absence of information. |
+| **9** | **MISSING** | The data point was not recorded (represented as `null` in CSV files). | Represents a data gap. This is not an error, just an absence of information. |
 | **0** | **NOT EVALUATED** | The test was not performed on this data point. | This usually happens at the edges of a profile or if other required data is missing. It doesn't mean the data is bad. |
 
 ---
@@ -82,10 +82,10 @@ Here is a breakdown of every test applied to the data.
 ### 4.3 Tier 3: Missing Value Test (`{VAR}_Na_QC`)
 
 *   **Purpose:** To clearly label all data gaps.
-*   **How it works:** This simple test checks if a measurement for a variable is `NaN` (Not a Number). It applies to `TEMP`, `CNDC`, `DOXY`, `CHLA`, and `TURB`.
+*   **How it works:** This simple test checks if a measurement for a variable is missing (represented as `null` in CSV files). It applies to `TEMP`, `CNDC`, `DOXY`, `CHLA`, and `TURB`.
 *   **Flagging:**
     *   `1` (GOOD): A valid number is present.
-    *   `9` (MISSING): The value is `NaN`.
+    *   `9` (MISSING): The value is null (missing).
 
 ### 4.4 Tier 4: Sensor Physical Limits Test (`{VAR}_Sensor_QC`)
 
@@ -114,7 +114,7 @@ Here is a breakdown of every test applied to the data.
 ### 4.7 Tier 7: Enhanced Spike Detection (Bio-Optical)
 
 *   **Purpose:** A specialized test to find spikes in the noisier bio-optical sensors (`CHLA`, `TURB`).
-*   **How it works:** This enhanced test uses a wider 5-point window and calculates the median. It's particularly good at finding sharp, negative spikes. A key feature is the **strict neighbor requirement**: if any of the neighbors in the window are `NaN`, the test is not performed on that point. This avoids incorrectly flagging points near data gaps.
+*   **How it works:** This enhanced test uses a wider 5-point window and calculates the median. It's particularly good at finding sharp, negative spikes. A key feature is the **strict neighbor requirement**: if any of the neighbors in the window are null (missing), the test is not performed on that point. This avoids incorrectly flagging points near data gaps.
 *   **Flagging:**
     *   `1` (GOOD): The point is consistent with the local median.
     *   `4` (BAD): The point is a significant negative anomaly.

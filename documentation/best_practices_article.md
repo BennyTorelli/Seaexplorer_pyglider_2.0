@@ -138,7 +138,7 @@ Our pipeline executes a dedicated QC script (`scripts/qc_variables.py`) that app
 
 *   **1 (GOOD):** The data point has passed all relevant QC tests and is considered reliable.
 *   **4 (BAD):** The data point has failed at least one critical QC test and is considered erroneous or highly suspect.
-*   **9 (MISSING):** The data point was not recorded or is unavailable (`NaN`).
+*   **9 (MISSING):** The data point was not recorded or is unavailable (represented as `null` in exported CSV files).
 *   **0 (NOT EVALUATED):** A specific QC test was not performed on the data point, often due to missing contextual data (e.g., at the edge of a profile).
 
 The following sections provide a detailed, test-by-test description of the framework, from foundational checks to advanced, platform-specific diagnostics.
@@ -158,7 +158,7 @@ These initial tests form the bedrock of the QC process, ensuring that the data h
 
 *   **Coastal Proximity QC (`LAND_QC`):** A more sophisticated spatial test, critical for coastal missions. This test uses a high-resolution shoreline shapefile (in this case, for La Palma) to determine if a glider's reported position is physically on land. It calculates the distance to the nearest coast and flags any point located within the land polygon as **bad (4)**. This prevents the erroneous interpretation of data collected while the glider may have been grounded or reporting inaccurate GPS fixes near the coast.
 
-*   **Missing Value QC (`Na_QC`):** A simple but vital test that flags every `NaN` (Not a Number) value with a `9`. This explicitly distinguishes missing data from measured data and ensures that data gaps are not misinterpreted.
+*   **Missing Value QC (`Na_QC`):** A simple but vital test that flags every missing value (represented as `null` in CSV files) with a `9`. This explicitly distinguishes missing data from measured data and ensures that data gaps are not misinterpreted.
 
 ### 3.2 Sensor and Environmental QC: From Plausibility to Dynamics
 
@@ -166,7 +166,7 @@ This tier of tests scrutinizes the sensor data itself, checking for physical pla
 
 *   **Regional Range Test (`{VAR}_Range_QC`):** This test has been specifically tailored for the mission area. Instead of a generic "global" range, we apply a **regional climatological check** based on known oceanographic conditions around the Canary Islands. For each variable (e.g., `TEMP`, `PSAL`), we define a plausible range derived from historical data (e.g., World Ocean Atlas) and expert knowledge of the region. For example, temperature values are expected to fall within a specific range characteristic of the North Atlantic Central Water. A value falling outside this regional box is flagged as **bad (4)**. This is more powerful than a global test as it can detect anomalous values that might still be globally plausible but are unrealistic for the specific study area.
 
-*   **Stuck Value Test (`{VAR}_Stuck_QC`):** This test is a crucial diagnostic for sensor failure. It identifies situations where a sensor reports the exact same value for a prolonged period within a single profile (ascent or descent). The script segments the data into profiles based on pressure changes and then checks for constant, non-`NaN` values within each segment. If found, all points in that segment for that variable are flagged as **bad (4)**, as this indicates a "stuck" sensor that is no longer responding to environmental changes.
+*   **Stuck Value Test (`{VAR}_Stuck_QC`):** This test is a crucial diagnostic for sensor failure. It identifies situations where a sensor reports the exact same value for a prolonged period within a single profile (ascent or descent). The script segments the data into profiles based on pressure changes and then checks for constant, non-null values within each segment. If found, all points in that segment for that variable are flagged as **bad (4)**, as this indicates a "stuck" sensor that is no longer responding to environmental changes.
 
 *   **Spike Test (3-Point Median for Physical Sensors):** A standard test for physical variables (`TEMP`, `PSAL`, `POTDEN`) that flags a point if it represents a significant, non-physical deviation from its two immediate neighbors. A point `p(i)` is flagged as a spike if `|p(i) - median(p(i-1), p(i), p(i+1))|` exceeds a pre-defined threshold. This is effective at catching transient electronic noise.
 
@@ -184,7 +184,7 @@ Bio-optical sensors, such as those measuring Chlorophyll-a (`CHLA`) and Turbidit
 
 *   **Enhanced Spike Test (5-Point Strict Median):** To handle the specific noise characteristics of these sensors, we have implemented a more robust spike detection algorithm that differs from the one used for physical sensors.
     *   **Methodology:** This test uses a 5-point median filter. A point `p(i)` is evaluated against the median of a window including its two preceding and two succeeding neighbors: `median(p(i-2), p(i-1), p(i), p(i+1), p(i+2))`. A wider window is used to better capture the baseline signal around potentially noisy spikes.
-    *   **Strict Neighbor Requirement:** A crucial enhancement is our strict handling of `NaN` values within the moving window. If **any** of the four neighbors (`p(i-2)`, `p(i-1)`, `p(i+1)`, `p(i+2)`) is `NaN`, the central point `p(i)` is not evaluated and flagged as **0 (not evaluated)**. This prevents the erroneous flagging of data points at the edges of data gaps, ensuring that spikes are only identified when there is a continuous, high-quality local context. This strictness significantly reduces false positives compared to more lenient methods that might interpolate across gaps.
+    *   **Strict Neighbor Requirement:** A crucial enhancement is our strict handling of missing values within the moving window. If **any** of the four neighbors (`p(i-2)`, `p(i-1)`, `p(i+1)`, `p(i+2)`) is null (missing), the central point `p(i)` is not evaluated and flagged as **0 (not evaluated)**. This prevents the erroneous flagging of data points at the edges of data gaps, ensuring that spikes are only identified when there is a continuous, high-quality local context. This strictness significantly reduces false positives compared to more lenient methods that might interpolate across gaps.
 
 *   **Surface Contamination QC (for Bio-optics):** Bio-optical measurements in the top few meters of the water column are highly susceptible to contamination. This can be caused by bubbles injected during the glider's submersion, interference from surface wave action, or biological phenomena like non-photochemical quenching (NPQ) in high sunlight. To account for this, this test prophylactically flags all `CHLA` and `TURB` data collected at pressures less than 5 dbar (~5 meters depth) as **bad (4)**. While this is a conservative measure, it ensures that data used for primary productivity or water clarity studies are free from near-surface artifacts.
 

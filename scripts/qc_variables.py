@@ -10,6 +10,27 @@ from shapely.geometry import Point, Polygon
 
 _log = logging.getLogger(__name__)
 
+
+def is_null_value(value):
+    """Check if a value is null (either numpy NaN or string 'null').
+    
+    This helper function handles both internal NaN representation and 
+    CSV string 'null' values.
+    
+    Args:
+        value: Value to check
+        
+    Returns:
+        True if value is null/NaN, False otherwise
+    """
+    if isinstance(value, str):
+        return value.lower() == 'null' or value == ''
+    try:
+        return np.isnan(value)
+    except (TypeError, ValueError):
+        return False
+
+
 # QC Range constants for La Palma zone (SeaExplorer sensors)
 # Source: Coriolis/PLOCAN QC ranges for oceanographic data
 QC_RANGES_LAPALMA = {
@@ -1613,8 +1634,8 @@ def export_qc_to_csv(ds: xr.Dataset, varname: str = None, csv_path: str = None):
         csv_path = f'output/analysis/seaexplorer_qc_variables.csv'
     import os
     os.makedirs(os.path.dirname(csv_path), exist_ok=True)
-    compact.to_csv(csv_path, index=False, na_rep='NaN')
-    _log.info('Wrote compact QC CSV to %s', csv_path)
+    compact.to_csv(csv_path, index=False, na_rep='null')
+    _log.info('Wrote compact QC CSV to %s (missing values represented as "null")', csv_path)
     return csv_path
 
 
