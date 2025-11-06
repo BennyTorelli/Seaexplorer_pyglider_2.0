@@ -37,7 +37,7 @@ QC_RANGES_LAPALMA = {
     'TEMP': {'min': 5.0, 'max': 30.0, 'unit': '°C'},
     'PSAL': {'min': 33.0, 'max': 38.0, 'unit': 'PSU'},
     'CNDC': {'min': 0.0, 'max': 7.0, 'unit': 'S/m'},  # Derived from PSAL range
-    'DOXY': {'min': 110.0, 'max': 250.0, 'unit': 'µmol/L'},
+    'DOXY': {'min': 110.0, 'max': 250.0, 'unit': 'µmol/kg'},
     'CHLA': {'min': 0.0, 'max': 42.0, 'unit': 'mg/m³'},
     'TURB': {'min': 0.0, 'max': 5.0, 'unit': 'NTU'},
     'PRES': {'min': 0.0, 'max': 2000.0, 'unit': 'dbar'},  # Typical glider max depth
@@ -673,7 +673,7 @@ def export_qc_to_csv(ds: xr.Dataset, varname: str = None, csv_path: str = None):
     else:
         compact['DOXY_Range_QC'] = ''
 
-    # DOXY Sensor QC (physical sensor range 0-500 µmol/L)
+    # DOXY Sensor QC (physical sensor range 0-500 µmol/kg)
     if 'DOXY' in ds:
         doxy_sensor_min = 0.0
         doxy_sensor_max = 500.0
