@@ -365,19 +365,10 @@ class SeaExplorerProcessor:
                 print(f"   Conversione CNDC: mS/cm → S/m (divisione per 10)")
                 modified = True
             
-            # Conversione OSSIGENO: corregge unità miste mmol/L → µmol/L
-            # Problema: primi ~1939 campioni in µmol/L (100-400), resto in mmol/L (0.1-0.5)
-            if 'oxygen_concentration' in ds:
-                doxy = ds['oxygen_concentration'].values
-                # Identifica valori in mmol/L (< 100) e convertili in µmol/L (* 1000)
-                low_values = (doxy > 0) & (doxy < 100)
-                n_converted = np.sum(low_values)
-                if n_converted > 0:
-                    doxy[low_values] = doxy[low_values] * 1000.0
-                    ds['oxygen_concentration'] = (ds['oxygen_concentration'].dims, doxy)
-                    ds['oxygen_concentration'].attrs['conversion_applied'] = f'Converted {n_converted} values from mmol/L to µmol/L (x1000)'
-                    print(f"   Conversione DOXY: {n_converted:,} valori mmol/L → µmol/L (x1000)")
-                    modified = True
+            # REMOVED: Erroneous mmol/L → µmol/L conversion
+            # PyGlider already provides DOXY in µmol/L (confirmed by RAW data analysis)
+            # The low values (0.3-1 µmol/L) are data errors/interpolation artifacts, not mmol/L
+            # These should be flagged by QC, not "fixed" with x1000 multiplication
             
             # Ricalcolo SALINITÀ con conducibilità corretta
             # Usa gsw (TEOS-10) per calcolare salinità pratica
@@ -439,7 +430,7 @@ class SeaExplorerProcessor:
                 
                 # Conversione OSSIGENO: µmol/L → µmol/kg usando densità corretta
                 if 'oxygen_concentration' in ds:
-                    doxy_umol_L = ds['oxygen_concentration'].values  # µmol/L (già corretto sopra)
+                    doxy_umol_L = ds['oxygen_concentration'].values  # µmol/L from PyGlider
                     
                     # Conversione: µmol/kg = µmol/L / (densità_kg/m³ / 1000)
                     # Equivale a: µmol/kg = µmol/L * 1000 / densità_kg/m³
@@ -449,7 +440,7 @@ class SeaExplorerProcessor:
                     ds['oxygen_concentration'] = (ds['oxygen_concentration'].dims, doxy_umol_kg)
                     ds['oxygen_concentration'].attrs['units'] = 'umol kg-1'
                     ds['oxygen_concentration'].attrs['long_name'] = 'oxygen concentration'
-                    ds['oxygen_concentration'].attrs['conversion_applied'] = 'Converted from µmol/L to µmol/kg using corrected density'
+                    ds['oxygen_concentration'].attrs['conversion_applied'] = 'Converted from µmol/L to µmol/kg using TEOS-10 in-situ density'
                     
                     doxy_valid = doxy_umol_kg[~np.isnan(doxy_umol_kg)]
                     print(f"   Conversione DOXY: µmol/L → µmol/kg, range {np.min(doxy_valid):.1f}-{np.max(doxy_valid):.1f} µmol/kg")
