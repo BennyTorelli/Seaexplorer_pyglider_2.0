@@ -37,7 +37,7 @@ QC_RANGES_LAPALMA = {
     'TEMP': {'min': 5.0, 'max': 30.0, 'unit': '°C'},
     'PSAL': {'min': 33.0, 'max': 38.0, 'unit': 'PSU'},
     'CNDC': {'min': 0.0, 'max': 7.0, 'unit': 'S/m'},  # Derived from PSAL range
-    'DOXY': {'min': 110.0, 'max': 250.0, 'unit': 'µmol/kg'},
+    'DOXY': {'min': 200.0, 'max': 700.0, 'unit': 'µmol/kg'},
     'CHLA': {'min': 0.0, 'max': 42.0, 'unit': 'mg/m³'},
     'TURB': {'min': 0.0, 'max': 5.0, 'unit': 'NTU'},
     'PRES': {'min': 0.0, 'max': 2000.0, 'unit': 'dbar'},  # Typical glider max depth
@@ -833,8 +833,62 @@ def export_qc_to_csv(ds: xr.Dataset, varname: str = None, csv_path: str = None):
         _log.warning("LATITUDE or LONGITUDE not found in dataset. LAND_QC column will be empty.")
         compact['LAND_QC'] = ''
 
+    # ========================================================================
+    # PROFILE DETECTION: Identify dive-climb cycles
+    # ========================================================================
+    def calculate_profile_numbers(time_values, pressure_values, pitch_values):
+        """
+        Calculate profile numbers based on dive-climb cycles.
+        A new profile starts when the glider transitions from climbing back to diving.
+        
+        Args:
+            time_values: numpy array of time values
+            pressure_values: numpy array of pressure values (dbar)
+            pitch_values: numpy array of pitch values (degrees)
+            
+        Returns:
+            numpy array of profile numbers (1, 2, 3, ...)
+        """
+        n = len(pressure_values)
+        if n < 3:
+            return np.ones(n, dtype=int)
+        
+        # Calculate pressure gradient (positive = descending, negative = ascending)
+        pres_gradient = np.gradient(pressure_values)
+        
+        # Initialize arrays
+        profiles = np.ones(n, dtype=int)
+        current_profile = 1
+        
+        # Track glider state
+        previous_diving = None
+        
+        for i in range(1, n):
+            # Determine current state
+            # Diving: negative pitch AND increasing pressure
+            # Climbing: positive pitch AND decreasing pressure
+            is_diving = pitch_values[i] < 0 and pres_gradient[i] > 0
+            is_climbing = pitch_values[i] > 0 and pres_gradient[i] < 0
+            
+            # Profile transition: climbing -> diving
+            if previous_diving is not None:
+                if not previous_diving and is_diving:  # was climbing, now diving
+                    current_profile += 1
+                    _log.info(f"Profile transition at index {i}, new profile: {current_profile}")
+            
+            profiles[i] = current_profile
+            
+            # Update state for next iteration
+            if is_diving:
+                previous_diving = True
+            elif is_climbing:
+                previous_diving = False
+            # If neither diving nor climbing clearly, keep previous state
+        
+        return profiles
+
     # merge in requested variable values so QC can be inspected alongside
-    value_vars = ['LATITUDE', 'LONGITUDE', 'TEMP', 'CNDC', 'PRES', 'CHLA', 'TURB', 'DOXY', 'PSAL', 'potential_density', 'pitch', 'VELOCITY']
+    value_vars = ['LATITUDE', 'LONGITUDE', 'TEMP', 'CNDC', 'PRES', 'CHLA', 'TURB', 'DOXY', 'PSAL', 'pitch', 'VELOCITY']
     present = [v for v in value_vars if v in ds]
     
     # Also check for legacy 'temperature' and treat it as 'TEMP'
@@ -869,18 +923,62 @@ def export_qc_to_csv(ds: xr.Dataset, varname: str = None, csv_path: str = None):
             df_vals = df_vals.rename(columns={'salinity': 'PSAL'})
             _log.info("Renamed salinity to PSAL (already in PSU units)")
         
-        # Rename 'potential_density' to 'POTDEN' for standardization
-        if 'potential_density' in df_vals.columns:
-            df_vals = df_vals.rename(columns={'potential_density': 'POTDEN'})
-            _log.info("Renamed potential_density to POTDEN for standardization")
-        
         # Rename 'pitch' to 'PITCH' for standardization
         if 'pitch' in df_vals.columns:
             df_vals = df_vals.rename(columns={'pitch': 'PITCH'})
             _log.info("Renamed pitch to PITCH for standardization")
         
+        # Check DOXY units - MASTER already converts with gsw.rho, so we only check for errors
+        if 'DOXY' in df_vals.columns:
+            # Check if DOXY is already in μmol/kg by examining the source dataset
+            if 'DOXY' in ds:
+                doxy_units = ds['DOXY'].attrs.get('units', '').lower()
+                conversion_applied = ds['DOXY'].attrs.get('conversion_applied', '')
+                
+                if 'kg' in doxy_units or 'conversion_applied' in ds['DOXY'].attrs:
+                    _log.info(f"✅ DOXY already in μmol/kg - conversion by MASTER verified")
+                    # MASTER already converted correctly with gsw.rho - no re-conversion needed
+                
+                else:
+                    # DOXY is still in μmol/L - this should not happen if MASTER ran successfully
+                    _log.warning("⚠️ DOXY appears to be in μmol/L - MASTER conversion may have failed")
+                    _log.warning("   QC will proceed but DOXY units may be incorrect")
+                    _log.warning("   Please verify that MASTER pipeline completed successfully")
+            else:
+                _log.warning("DOXY not found in source dataset - cannot verify units")
+        
         # merge values into compact by time
         compact = compact.merge(df_vals, on='time', how='left')
+
+    # ========================================================================
+    # PROFILE CALCULATION: Identify dive-climb cycles
+    # ========================================================================
+    if 'PRES' in compact.columns and 'PITCH' in compact.columns:
+        pres_vals = compact['PRES'].values
+        pitch_vals = compact['PITCH'].values
+        
+        _log.info(f"Calculating PROFILE numbers with {len(compact)} data points")
+        _log.info(f"PRES range: {pres_vals.min():.1f} - {pres_vals.max():.1f} dbar")
+        _log.info(f"PITCH range: {pitch_vals.min():.1f} - {pitch_vals.max():.1f}°")
+        
+        # Calculate profile numbers
+        profile_numbers = calculate_profile_numbers(None, pres_vals, pitch_vals)
+        compact['PROFILE'] = profile_numbers
+        
+        n_profiles = profile_numbers.max()
+        _log.info(f"✅ Calculated {n_profiles} dive profiles")
+        
+        # Log first 5 profile statistics
+        for profile_num in range(1, min(6, n_profiles + 1)):
+            profile_mask = profile_numbers == profile_num
+            if profile_mask.any():
+                profile_pres = pres_vals[profile_mask]
+                profile_count = profile_mask.sum()
+                max_depth = profile_pres.max() if len(profile_pres) > 0 else 0
+                _log.info(f"  Profile {profile_num}: {profile_count} points, max depth: {max_depth:.1f} dbar")
+    else:
+        _log.warning("⚠️ PRES or PITCH not available - cannot calculate PROFILE")
+        compact['PROFILE'] = 0
 
     # ========================================================================
     # SPIKE QC: Detect abrupt changes in T, S, O2
@@ -1565,15 +1663,13 @@ def export_qc_to_csv(ds: xr.Dataset, varname: str = None, csv_path: str = None):
         compact['TURB_Surface_QC'] = 0
         _log.info('TURB or PRES not available, TURB_Surface_QC set to 0')
 
-    # For column ordering, replace 'temperature', 'salinity', 'pitch' and 'potential_density' with standardized names
+    # For column ordering, replace 'temperature', 'salinity', 'pitch' with standardized names
     present_standardized = []
     for v in present:
         if v == 'salinity':
             present_standardized.append('PSAL')
         elif v == 'temperature':
             present_standardized.append('TEMP')
-        elif v == 'potential_density':
-            present_standardized.append('POTDEN')
         elif v == 'pitch':
             present_standardized.append('PITCH')
         else:
@@ -1595,7 +1691,7 @@ def export_qc_to_csv(ds: xr.Dataset, varname: str = None, csv_path: str = None):
     if 'pitch' in compact.columns and 'PITCH' not in compact.columns:
         compact['PITCH'] = compact['pitch']
     
-    # reorder columns to TIME, DEPTH, requested values (including PITCH from present_standardized), then Range_QC columns, then Na_QC columns, then Sensor_QC, then LAND_QC, then Spike_QC, then Gradient_QC
+    # reorder columns to TIME, PROFILE, DEPTH, requested values (including PITCH from present_standardized), then Range_QC columns, then Na_QC columns, then Sensor_QC, then LAND_QC, then Spike_QC, then Gradient_QC
     range_qc_cols = ['Date_QC', 'Location_QC', 'TEMP_Range_QC', 'CNDC_Range_QC', 'CHLA_Range_QC', 'TURB_Range_QC', 'DOXY_Range_QC', 'PSAL_Range_QC']
     na_qc_cols = ['TEMP_Na_QC', 'CNDC_Na_QC', 'DOXY_Na_QC', 'CHLA_Na_QC', 'TURB_Na_QC']
     sensor_qc_cols = ['TEMP_Sensor_QC', 'CNDC_Sensor_QC', 'DOXY_Sensor_QC', 'CHLA_Sensor_QC', 'TURB_Sensor_QC']
@@ -1608,8 +1704,8 @@ def export_qc_to_csv(ds: xr.Dataset, varname: str = None, csv_path: str = None):
     increasing_qc_cols = ['PRES_Increasing_QC']
     stuck_qc_cols = ['TEMP_Stuck_QC', 'CNDC_Stuck_QC', 'DOXY_Stuck_QC', 'CHLA_Stuck_QC', 'TURB_Stuck_QC']
     velocity_qc_cols = ['VELOCITY_QC']
-    # Order: TIME, DEPTH, data variables (including PITCH), then Range_QC columns, then Na_QC, then Sensor_QC, then LAND_QC, then Spike_QC, then Gradient_QC, etc.
-    cols = ['time', 'depth'] + present_standardized + range_qc_cols + na_qc_cols + sensor_qc_cols + land_qc_cols + spike_qc_cols + surface_qc_cols + gradient_qc_cols + pres_qc_cols + density_qc_cols + increasing_qc_cols + stuck_qc_cols + velocity_qc_cols
+    # Order: TIME, PROFILE, DEPTH, data variables (including PITCH), then Range_QC columns, then Na_QC, then Sensor_QC, then LAND_QC, then Spike_QC, then Gradient_QC, etc.
+    cols = ['time', 'PROFILE', 'depth'] + present_standardized + range_qc_cols + na_qc_cols + sensor_qc_cols + land_qc_cols + spike_qc_cols + surface_qc_cols + gradient_qc_cols + pres_qc_cols + density_qc_cols + increasing_qc_cols + stuck_qc_cols + velocity_qc_cols
     # keep only columns that exist in compact
     cols = [c for c in cols if c in compact.columns]
     compact = compact[cols]
@@ -1628,6 +1724,67 @@ def export_qc_to_csv(ds: xr.Dataset, varname: str = None, csv_path: str = None):
         compact = compact.rename(columns={'time': 'TIME'})
     if 'depth' in compact.columns:
         compact = compact.rename(columns={'depth': 'DEPTH'})
+
+    # Export PROFILE to separate CSV file before removing it from compact
+    if 'PROFILE' in compact.columns and 'TIME' in compact.columns:
+        profile_df = compact[['TIME', 'PROFILE']].copy()
+        
+        # Add VerticalDirection column (up/down based on pitch and pressure gradient)
+        if 'PRES' in compact.columns and 'PITCH' in compact.columns:
+            pres_vals = compact['PRES'].values
+            pitch_vals = compact['PITCH'].values
+            
+            # Calculate pressure gradient (positive = descending, negative = ascending)
+            pres_gradient = np.gradient(pres_vals)
+            
+            # Determine vertical direction for each point
+            vertical_direction = np.full(len(pres_vals), '', dtype=object)
+            last_known_direction = 'down'  # Initialize with default
+            
+            for i in range(len(pres_vals)):
+                # Primary logic: use pitch as main indicator
+                # Diving: negative pitch (nose down)
+                # Climbing: positive pitch (nose up)
+                
+                # Secondary confirmation: pressure gradient
+                # down: pressure increasing (pres_gradient > 0)
+                # up: pressure decreasing (pres_gradient < 0)
+                
+                # Determine direction with priority: pitch first, then gradient, then inherit
+                if pitch_vals[i] < -1:  # Clear diving signal (threshold to avoid noise)
+                    current_direction = 'down'
+                elif pitch_vals[i] > 1:  # Clear climbing signal
+                    current_direction = 'up'
+                elif pres_gradient[i] > 0.5:  # Pressure clearly increasing
+                    current_direction = 'down'
+                elif pres_gradient[i] < -0.5:  # Pressure clearly decreasing
+                    current_direction = 'up'
+                else:
+                    # Ambiguous case: inherit last known direction
+                    current_direction = last_known_direction
+                
+                vertical_direction[i] = current_direction
+                last_known_direction = current_direction
+            
+            profile_df['VerticalDirection'] = vertical_direction
+            
+            # Log statistics
+            n_down = np.sum(vertical_direction == 'down')
+            n_up = np.sum(vertical_direction == 'up')
+            _log.info(f'VerticalDirection: {n_down} down, {n_up} up (no gaps)')
+        else:
+            _log.warning('PRES or PITCH not available - VerticalDirection will be empty')
+            profile_df['VerticalDirection'] = ''
+        
+        profile_csv_path = 'output/analysis/seaexplorer_profile.csv'
+        import os
+        os.makedirs(os.path.dirname(profile_csv_path), exist_ok=True)
+        profile_df.to_csv(profile_csv_path, index=False, na_rep='null')
+        _log.info(f'Wrote PROFILE data to {profile_csv_path} ({len(profile_df)} rows, 3 columns)')
+        
+        # Remove PROFILE column from compact before saving QC variables CSV
+        compact = compact.drop(columns=['PROFILE'])
+        _log.info('Removed PROFILE column from QC variables CSV (now in separate file)')
 
     if csv_path is None:
         # Use a canonical variables-level filename rather than per-variable by default

@@ -149,13 +149,13 @@ def load_qc_csv(input_path: str) -> pd.DataFrame:
 
 def create_validated_dataset(df_qc):
     """
-    Create validated dataset starting with TIME column.
+    Create validated dataset with scientific data and QC flags alternated.
     
     Args:
         df_qc: DataFrame from qc_variables.py output
         
     Returns:
-        DataFrame with validated columns
+        DataFrame with validated columns (data + QC flags)
     """
     _log.info("Creating validated dataset...")
     
@@ -166,14 +166,23 @@ def create_validated_dataset(df_qc):
     _log.info(f"Added TIME column with {len(validated_df)} timestamps")
     _log.info(f"Time range: {validated_df['TIME'].min()} to {validated_df['TIME'].max()}")
     
-    # Step 2: Add DATE_QC and LOCATION_QC flags
+    # Step 2: Add DATE_QC
     validated_df['DATE_QC'] = df_qc['Date_QC']
-    validated_df['LOCATION_QC'] = df_qc['Location_QC']
     
     _log.info(f"Added DATE_QC column - Flag distribution:")
     _log.info(f"  {validated_df['DATE_QC'].value_counts().to_dict()}")
+    
+    # Step 3: Add LATITUDE, LONGITUDE, LOCATION_QC
+    validated_df['LATITUDE'] = df_qc['LATITUDE']
+    validated_df['LONGITUDE'] = df_qc['LONGITUDE']
+    validated_df['LOCATION_QC'] = df_qc['Location_QC']
+    
+    _log.info(f"Added LATITUDE, LONGITUDE columns")
     _log.info(f"Added LOCATION_QC column - Flag distribution:")
-    # Step 3: Add aggregated Temp_QC flag
+    _log.info(f"  {validated_df['LOCATION_QC'].value_counts().to_dict()}")
+    
+    # Step 5: Add TEMP + TEMP_QC (aggregated)
+    validated_df['TEMP'] = df_qc['TEMP']
     _log.info("Aggregating TEMP QC flags...")
     temp_qc_columns = [
         'TEMP_Range_QC',
@@ -190,10 +199,11 @@ def create_validated_dataset(df_qc):
         axis=1
     )
     
-    _log.info(f"Added TEMP_QC column - Flag distribution:")
+    _log.info(f"Added TEMP + TEMP_QC - Flag distribution:")
     _log.info(f"  {validated_df['TEMP_QC'].value_counts().to_dict()}")
     
-    # Step 4: Add aggregated CNDC_QC flag
+    # Step 5: Add CNDC + CNDC_QC (aggregated)
+    validated_df['CNDC'] = df_qc['CNDC']
     _log.info("Aggregating CNDC QC flags...")
     cndc_qc_columns = [
         'CNDC_Range_QC',
@@ -208,10 +218,11 @@ def create_validated_dataset(df_qc):
         axis=1
     )
     
-    _log.info(f"Added CNDC_QC column - Flag distribution:")
+    _log.info(f"Added CNDC + CNDC_QC - Flag distribution:")
     _log.info(f"  {validated_df['CNDC_QC'].value_counts().to_dict()}")
     
-    # Step 5: Add aggregated CHLA_QC flag
+    # Step 6: Add CHLA + CHLA_QC (aggregated)
+    validated_df['CHLA'] = df_qc['CHLA']
     _log.info("Aggregating CHLA QC flags...")
     chla_qc_columns = [
         'CHLA_Range_QC',
@@ -228,10 +239,11 @@ def create_validated_dataset(df_qc):
         axis=1
     )
     
-    _log.info(f"Added CHLA_QC column - Flag distribution:")
+    _log.info(f"Added CHLA + CHLA_QC - Flag distribution:")
     _log.info(f"  {validated_df['CHLA_QC'].value_counts().to_dict()}")
     
-    # Step 6: Add aggregated TURB_QC flag
+    # Step 7: Add TURB + TURB_QC (aggregated)
+    validated_df['TURB'] = df_qc['TURB']
     _log.info("Aggregating TURB QC flags...")
     turb_qc_columns = [
         'TURB_Range_QC',
@@ -248,10 +260,11 @@ def create_validated_dataset(df_qc):
         axis=1
     )
     
-    _log.info(f"Added TURB_QC column - Flag distribution:")
+    _log.info(f"Added TURB + TURB_QC - Flag distribution:")
     _log.info(f"  {validated_df['TURB_QC'].value_counts().to_dict()}")
     
-    # Step 7: Add aggregated DOXY_QC flag
+    # Step 8: Add DOXY + DOXY_QC (aggregated)
+    validated_df['DOXY'] = df_qc['DOXY']
     _log.info("Aggregating DOXY QC flags...")
     doxy_qc_columns = [
         'DOXY_Range_QC',
@@ -268,10 +281,11 @@ def create_validated_dataset(df_qc):
         axis=1
     )
     
-    _log.info(f"Added DOXY_QC column - Flag distribution:")
+    _log.info(f"Added DOXY + DOXY_QC - Flag distribution:")
     _log.info(f"  {validated_df['DOXY_QC'].value_counts().to_dict()}")
     
-    # Step 8: Add aggregated PSAL_QC flag
+    # Step 9: Add PSAL + PSAL_QC (aggregated)
+    validated_df['PSAL'] = df_qc['PSAL']
     _log.info("Aggregating PSAL QC flags...")
     psal_qc_columns = [
         'PSAL_Range_QC',
@@ -285,10 +299,11 @@ def create_validated_dataset(df_qc):
         axis=1
     )
     
-    _log.info(f"Added PSAL_QC column - Flag distribution:")
+    _log.info(f"Added PSAL + PSAL_QC - Flag distribution:")
     _log.info(f"  {validated_df['PSAL_QC'].value_counts().to_dict()}")
     
-    # Step 9: Add aggregated PRES_QC flag
+    # Step 10: Add PRES + PRES_QC (aggregated)
+    validated_df['PRES'] = df_qc['PRES']
     _log.info("Aggregating PRES QC flags...")
     pres_qc_columns = [
         'PRES_Max_QC',
@@ -302,19 +317,20 @@ def create_validated_dataset(df_qc):
         axis=1
     )
     
-    _log.info(f"Added PRES_QC column - Flag distribution:")
+    _log.info(f"Added PRES + PRES_QC - Flag distribution:")
     _log.info(f"  {validated_df['PRES_QC'].value_counts().to_dict()}")
     
-    # Step 10: Add LAND_QC flag (direct copy, no aggregation)
+    # Step 11: Add LAND_QC flag (direct copy, no data column)
     validated_df['LAND_QC'] = df_qc['LAND_QC']
     
     _log.info(f"Added LAND_QC column - Flag distribution:")
     _log.info(f"  {validated_df['LAND_QC'].value_counts().to_dict()}")
     
-    # Step 11: Add VELOCITY_QC flag (direct copy, no aggregation)
+    # Step 12: Add VELOCITY + VELOCITY_QC (direct copy)
+    validated_df['VELOCITY'] = df_qc['VELOCITY']
     validated_df['VELOCITY_QC'] = df_qc['VELOCITY_QC']
     
-    _log.info(f"Added VELOCITY_QC column - Flag distribution:")
+    _log.info(f"Added VELOCITY + VELOCITY_QC - Flag distribution:")
     _log.info(f"  {validated_df['VELOCITY_QC'].value_counts().to_dict()}")
     
     return validated_df

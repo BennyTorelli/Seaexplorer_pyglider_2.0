@@ -7,9 +7,9 @@
 
 ## Abstract
 
-Autonomous underwater gliders have become essential tools for sustained ocean observations, but the lack of standardized, end-to-end data processing and quality control workflows remains a significant challenge for the scientific community. This article presents a comprehensive best-practice framework for transforming raw SeaExplorer glider data into analysis-ready, high-quality datasets. We detail a complete pipeline, built upon the open-source `PyGlider` toolbox, which automates the entire workflow from initial data ingestion to the generation of science-ready products. The process includes critical custom enhancements for unit standardization according to TEOS-10 oceanographic conventions and a multi-tiered Quality Control (QC) system. This QC framework integrates established methods with novel procedures specifically designed for glider data, such as automated coastal proximity detection (LAND_QC), advanced spike detection for physical and bio-optical sensors, and density inversion checks. We demonstrate the workflow using data from a 21-day SeaExplorer mission near La Palma, Canary Islands, processing over 1.8 million data points. The results highlight the pipeline's capability to correct unit inconsistencies, identify sensor anomalies, and produce fully-documented, reproducible datasets. All code, configuration files, and methodologies are openly available, providing a robust and reusable template for the glider community to enhance data quality, ensure interoperability, and adhere to FAIR data principles.
+Autonomous underwater gliders are essential tools for sustained ocean observations, yet the lack of standardized, end-to-end data processing workflows remains a significant challenge. This article presents a comprehensive best-practice framework for transforming raw SeaExplorer glider data into analysis-ready, high-quality datasets. We detail a three-stage, open-source Python pipeline that automates the entire workflow, from raw data ingestion to the generation of final science-ready products. The process includes critical enhancements for TEOS-10 unit standardization and a multi-tiered Quality Control (QC) system. A key innovation of our approach is the generation of two distinct QC products: (1) a granular diagnostic file containing over 30 individual QC flags for expert analysis, and (2) a final validated dataset where flags are aggregated into a single, user-friendly quality indicator per variable. The framework also introduces novel QC tests, including automated dive-climb profile identification (`PROFILE` test) and robust coastal proximity checks (`LAND_QC`). We demonstrate the workflow using data from a SeaExplorer mission near La Palma, Canary Islands. The results highlight the pipeline's capability to correct unit inconsistencies, identify sensor anomalies, and produce fully-documented, reproducible, and analysis-ready datasets that cater to both expert data managers and end-user scientists. All code is openly available, providing a robust template for the glider community to enhance data quality and adhere to FAIR principles.
 
-**Keywords:** autonomous underwater glider, SeaExplorer, PyGlider, data processing, quality control, oceanographic data, best practices, TEOS-10, open science, reproducibility
+**Keywords:** autonomous underwater glider, SeaExplorer, PyGlider, data processing, quality control, oceanographic data, best practices, TEOS-10, open science, reproducibility, data pipeline
 
 ---
 
@@ -17,24 +17,24 @@ Autonomous underwater gliders have become essential tools for sustained ocean ob
 
 ### 1.1 The Rise of Glider Oceanography and the Data Challenge
 
-Autonomous underwater gliders have revolutionized oceanographic observation over the past two decades (Rudnick, 2016; Testor et al., 2019). These platforms provide sustained, high-resolution measurements of physical and biogeochemical properties across vast ocean regions, complementing traditional ship-based surveys and fixed moorings. The SeaExplorer glider (manufactured by ALSEAMAR), in particular, has proven to be a versatile and robust platform for extended missions in differents ocean environments, thanks to its high payload capacity and energy efficiency.
+Autonomous underwater gliders have revolutionized oceanographic observation over the past two decades (Rudnick, 2016; Testor et al., 2019). These platforms provide sustained, high-resolution measurements of physical and biogeochemical properties across vast ocean regions, complementing traditional ship-based surveys and fixed moorings. The SeaExplorer glider (manufactured by ALSEAMAR), in particular, has proven to be a versatile and robust platform for extended missions in diverse ocean environments.
 
 However, the proliferation of glider missions has created a new challenge: the management and processing of the vast and complex datasets they generate. Raw glider data often suffer from a range of issues that hinder direct scientific analysis:
-1.  **Proprietary and Complex File Formats:** Data are often stored in multiple, instrument-specific binary files.
-2.  **Inconsistent Naming and Units:** Variables may lack standardized names, and units can be mixed or non-standard (e.g., mS/cm vs. S/m).
+1.  **Proprietary and Complex File Formats:** Data are often stored in multiple, instrument-specific binary or text files.
+2.  **Inconsistent Naming and Units:** Variables may lack standardized names, and units can be mixed or non-standard (e.g., mS/cm vs. S/m for conductivity).
 3.  **Data Quality Issues:** Raw data streams are susceptible to errors from sensor noise, biofouling, environmental contamination, or transmission failures.
 4.  **Lack of Standardization:** The absence of a unified processing workflow makes it difficult to compare data across different missions or institutions, hindering large-scale oceanographic synthesis.
 
 ### 1.2 Bridging the Gap with Open-Source Tools
 
-The open-source Python package `PyGlider` (Gregor et al., 2019) has made significant strides in addressing some of these issues by providing a foundational framework for converting raw data from multiple glider types (including Seaglider, Slocum, and SeaExplorer) into a more usable, standardized netCDF format. However, `PyGlider` is a toolbox, not a complete, end-to-end solution. The production of truly "science-ready" data requires significant additional steps, particularly in the areas of unit standardization and rigorous, multi-faceted quality control.
+The open-source Python package `PyGlider` (Gregor et al., 2019) has made significant strides in addressing some of these issues by providing a foundational framework for converting raw data from multiple glider types into a standardized netCDF format. However, `PyGlider` is a toolbox, not a complete, end-to-end solution. The production of truly "science-ready" data requires significant additional steps, particularly in unit standardization, rigorous quality control, and the generation of user-friendly final products.
 
 ### 1.3 Objectives of This Best-Practice Guide
 
-This article details a comprehensive, best-practice workflow that extends the capabilities of `PyGlider` to create a fully automated and reproducible data processing pipeline. Our primary objectives are to:
-1.  **Provide an End-to-End Solution:** Document a complete data processing chain, from raw file decompression to the generation of analysis-ready products.
-2.  **Implement Rigorous Quality Control:** Describe a multi-tiered QC framework that applies both established and novel tests to ensure data integrity, following international standards (e.g., QARTOD, Argo).
-3.  **Ensure Oceanographic Accuracy:** Detail the critical steps for standardizing units and recalculating key variables (salinity, density) according to the Thermodynamic Equation of Seawater 2010 (TEOS-10).
+This article details a comprehensive, best-practice workflow that extends the capabilities of `PyGlider` to create a fully automated and reproducible data processing pipeline. While several frameworks for glider data processing exist, few offer a complete, open-source, and end-to-end solution that is both deeply documented and easily adaptable. Our primary objectives are to:
+1.  **Provide a Modular, End-to-End Solution:** Document a complete three-stage data processing chain, from raw file ingestion to the generation of analysis-ready products.
+2.  **Implement a Two-Tiered QC Output:** Describe a novel QC framework that produces both a granular diagnostic file for data managers and a simplified, aggregated file for end-user scientists.
+3.  **Introduce Advanced QC Procedures:** Detail new and enhanced QC tests, including dive profile identification and robust spike detection for bio-optical sensors.
 4.  **Promote Reproducibility and Open Science:** Offer a fully documented and open-source codebase that serves as a reusable template for the oceanographic community.
 
 We demonstrate this workflow using a real-world dataset from a SeaExplorer mission, providing a practical guide for other research groups to adopt and adapt for their own deployments.
@@ -43,224 +43,241 @@ We demonstrate this workflow using a real-world dataset from a SeaExplorer missi
 
 ## 2. Materials and Methods
 
-### 2.1 The La Palma Mission: A Case Study
+### 2.1 Case Study: Mission Context and Technical Ecosystem
 
-To illustrate our pipeline, we use data from a representative SeaExplorer mission conducted off the coast of La Palma, Canary Islands, Spain.
+To illustrate our pipeline, we use data from a representative SeaExplorer mission conducted off the coast of La Palma, Canary Islands, Spain. The mission, identified as `sea074-2025`, ran from March 2023 to September 2025, yielding over 128 vertical profiles that reached a maximum depth of 1,031 m and collected a total of 1,415,714 multi-parameter measurements in the waters surrounding the island (approx. 28.45°N - 28.86°N, 18.01°W - 17.72°W).
 
-*   **Location:** Waters surrounding La Palma, Canary Islands (approx. 28.45°N - 28.86°N, 18.01°W - 17.72°W)
-*   **Mission Duration:** February 12 - March 5, 2025 (21 days)
-*   **Platform:** SeaExplorer glider (ID: sea074)
-*   **Key Statistics:** The mission yielded 358 vertical profiles (179 down-casts, 179 up-casts), reaching a maximum depth of 1,030 m and collecting a total of 1,825,662 multi-parameter measurements.
+The SeaExplorer glider was equipped with a standard suite of physical and biogeochemical sensors critical for defining QC parameters: a SBE 41CP CTD for physical measurements (Conductivity, Temperature, Depth), an Aanderaa Optode 4330 for Dissolved Oxygen, and a WET Labs ECO Puck for bio-optical properties (Chlorophyll-a fluorescence and Optical Backscatter at 700 nm).
 
-### 2.2 Sensor Suite
+The processing pipeline is built entirely on a modern, open-source Python (v3.13.5) software ecosystem, ensuring maximum accessibility and reproducibility. Core libraries include `PyGlider` for the initial data conversion, `xarray` for handling the standardized netCDF data structures, `pandas` for data manipulation and CSV export, the `gsw` library for TEOS-10 thermodynamic calculations of seawater properties, and `shapely` for the computational geometry used in our coastal proximity QC test. All scripts, configuration files, and documentation for this framework are openly available at https://github.com/BennyTorelli/Seaexplorer_pyglider_2.0.
 
-The SeaExplorer was equipped with a standard suite of physical and biogeochemical sensors, whose characteristics are crucial for defining QC parameters.
+### 2.2 The Three-Stage Data Processing and QC Pipeline
 
-*   **Physical:** SBE 41CP CTD (Conductivity, Temperature, Depth).
-*   **Biogeochemical:** Aanderaa Optode 4330 (Dissolved Oxygen) and a WET Labs ECO Puck measuring Chlorophyll-a fluorescence, CDOM fluorescence, and Optical Backscatter (700 nm).
+The complete workflow is designed as a modular, three-stage process, orchestrated by a series of Python scripts. This structure separates concerns, making the pipeline transparent, maintainable, and robust.
 
-### 2.3 The Software Ecosystem
+#### **Stage 1: Core Data Processing (`MASTER_pyglider_pipeline.py`)**
 
-Our pipeline is built entirely on open-source software, ensuring accessibility and reproducibility.
+**Objective:** To convert raw, fragmented glider files into a single, time-ordered, and physically consistent Level-0 (L0) dataset.
 
-*   **Python Version:** 3.13.5
-*   **Core Libraries:**
-    *   `PyGlider` (0.0.7): For core data conversion.
-    *   `xarray` (2025.9.0): For handling multi-dimensional labeled data (netCDF).
-    *   `pandas` (2.3.2): For data manipulation and CSV export.
-    *   `gsw` (3.6.20): For TEOS-10 thermodynamic calculations of seawater properties.
-    *   `shapely` (2.1.2): For computational geometry, used in our coastal proximity QC.
-*   **Repository:** All scripts and configuration files are available at: https://github.com/BennyTorelli/Seaexplorer_pyglider
+This initial stage is managed by the `MASTER_pyglider_pipeline.py` script, which performs the following critical steps:
 
-### 2.4 The Data Processing Pipeline: A Discursive Walkthrough
+1.  **File Preparation:** Raw data files are decompressed and "sanitized" to correct formatting inconsistencies (e.g., replacing 'NULL' timestamps) that would otherwise cause fatal parsing errors.
+2.  **Core `PyGlider` Conversion:** The script leverages the `PyGlider` library to parse the multitude of raw text files (`.pld`, `.gli`) and convert them into a unified time-series dataset.
+3.  **TEOS-10 Standardization (Critical Enhancement):** Before finalizing the L0 product, a custom function performs essential unit conversions and recalculations to ensure compliance with the Thermodynamic Equation of Seawater 2010 (TEOS-10). This includes:
+    *   Converting conductivity to S/m.
+    *   Recalculating Practical Salinity (`PSAL`) and in-situ density (`rho`) using the `gsw` library.
+    *   Standardizing Dissolved Oxygen (`DOXY`) units from µmol/L to the mass-based µmol/kg, making the measurement independent of temperature and pressure.
+4.  **L0 Product Generation:** The final output of this stage is a clean, CF-compliant NetCDF file (`output/l0_data/timeseries/sea074-2025.nc`) containing all variables with standardized units. This file serves as the input for the next stage.
 
-The complete processing workflow is orchestrated by a master script, `MASTER_pyglider_pipeline.py`, which executes a sequence of steps designed to be both modular and robust. Here, we describe the rationale and function of each step.
+#### **Stage 2: Granular Quality Control (`scripts/qc_variables.py`)**
 
-#### Step 0: File Preparation and Sanitization
+**Objective:** To apply a comprehensive suite of over 30 individual QC tests and generate a detailed diagnostic file.
 
-**Rationale:** Raw data from the glider is often delivered in a compressed format and may contain formatting inconsistencies that can cause processing tools to fail. This initial step prepares the data for robust parsing.
+This stage is executed by `scripts/qc_variables.py`, which takes the L0 NetCDF file and produces a wide-format CSV file (`output/analysis/seaexplorer_qc_variables.csv`). This file is the **granular QC matrix**, where each row is a data point and each column represents a specific QC test for a specific variable. The philosophy is to **flag, not remove**, providing maximum information to the user.
 
-**Implementation:**
-1.  **Decompression:** The pipeline first scans the raw data directory for any `.gz` files and decompresses them. This is a necessary prerequisite as `PyGlider` operates on the uncompressed text-based log files.
-2.  **Sanitization:** A crucial custom function, `_sanitize_raw_logs`, is executed. It reads the raw text files and specifically targets the timestamp columns (e.g., `PLD_REALTIMECLOCK`). It searches for empty or invalid timestamp entries (e.g., 'NULL', '-') and replaces them with a placeholder date ('01/01/1971 00:00:00.000'). This prevents fatal errors during the date-parsing stage in `PyGlider`, which expects a valid datetime format in every row.
+The QC tests are organized into several categories, using a standard flag scheme (1=GOOD, 4=BAD, 9=MISSING, 0=NOT_EVALUATED). Key tests include:
 
-#### Step 1 & 2: Core PyGlider Conversion and Merging
+*   **Foundational Checks:**
+    *   `Date_QC` & `Location_QC`: Granular checks on the validity of timestamps and geographical coordinates.
+    *   `LAND_QC`: A sophisticated test using a shoreline shapefile to flag data points physically located on land.
+    *   `Na_QC`: Explicitly flags all missing values.
 
-**Rationale:** This is the core function of `PyGlider`, converting the numerous, fragmented raw text files into a single, consolidated dataset.
+*   **Sensor and Environmental Plausibility:**
+    *   `{VAR}_Range_QC`: A regional climatological range test tailored for the Canary Islands area.
+    *   `{VAR}_Stuck_QC`: Detects if a sensor is reporting a constant value, indicating malfunction.
+    *   `PRES_Increasing_QC`: Ensures pressure values are monotonically increasing during a dive profile, flagging data from potential pressure stalls or yo-yo movements.
 
-**Implementation:**
-1.  **Raw to Parquet (`raw_to_rawnc`):** The `seaexplorer.raw_to_rawnc` function is called. It reads all the sanitized `.pld1`, `.gli`, and `.pld0` files, parses them according to the sensor definitions in the `deployment.yml` file, and converts them into an efficient intermediate `parquet` format.
-    ```python
-    # From MASTER_pyglider_pipeline.py
-    seaexplorer.raw_to_rawnc(
-        rawdir='input/sanitized/',
-        rawncdir='output/l0_data/rawnc/',
-        deploymentyaml='config/seaexplorer_0067.yml'
-    )
-    ```
-2.  **Merge Parquet (`merge_parquet`):** The resulting collection of `parquet` files is then merged into a single, time-ordered master `parquet` file. This step consolidates all sensor data into a unified timeline.
+*   **Advanced Dynamic and Profile-Based QC:**
+    *   **`PROFILE` Identification (New Test):** A key innovation of this pipeline. This test identifies individual dive-climb cycles by analyzing the time-series of pressure (`PRES`) and pitch angle (`PITCH`). A new profile is marked at the transition from a climbing phase (positive pitch, decreasing pressure) to a diving phase (negative pitch, increasing pressure). This segments the continuous time-series into oceanographically relevant vertical profiles, which is essential for contextual analysis.
+    *   `{VAR}_Spike_QC`: Uses robust median filters (3-point for physical, 5-point for bio-optical) to detect and flag non-physical spikes.
+    *   `VELOCITY_QC`: Calculates the glider's speed through water and flags physically unrealistic values (>401 cm/s).
+    *   `{VAR}_Surface_QC`: Prophylactically flags bio-optical data in the top 5 dbar to avoid surface contamination from bubbles or light effects.
 
-#### Step 3: Generation of Level-0 Time-Series NetCDF
+The output of this stage, `seaexplorer_qc_variables.csv`, is an expert-level diagnostic tool. It allows a data manager to trace the origin of any quality issue by inspecting the individual flags for every test performed.
 
-**Rationale:** The merged `parquet` file is an intermediate product. The goal is to create a standard, self-describing netCDF file that adheres to Climate and Forecast (CF) conventions. This is the first "usable" data product.
+#### **Stage 3: QC Aggregation and Final Validation (`QC_validated.py`)**
 
-**Implementation:** The `seaexplorer.raw_to_timeseries` function is used to convert the merged `parquet` file into a Level-0 (L0) time-series netCDF file. This file contains all variables with their initial calibrations applied, but before advanced unit conversions and quality control.
+**Objective:** To synthesize the granular QC information into a single, user-friendly quality flag per variable and produce a final, analysis-ready dataset.
 
-#### Step 3b: Custom Unit Conversions and Recalculations (Critical Enhancement)
+The final stage is handled by `QC_validated.py`. This script reads the granular QC matrix from Stage 2 and performs the crucial step of **flag aggregation**.
 
-**Rationale:** This is one of the most critical contributions of our pipeline. Raw sensor outputs are often not in standard scientific units, which prevents accurate oceanographic calculations. This step corrects units and recalculates key derived parameters using the TEOS-10 standard, ensuring the data are physically consistent and comparable.
+1.  **Aggregation Logic:** For each primary variable (e.g., `TEMP`), the script collects all associated QC flags (e.g., `TEMP_Range_QC`, `TEMP_Spike_QC`, `TEMP_Stuck_QC`). It then determines a single, final `TEMP_QC` flag based on a priority system: if any individual flag is `4` (BAD), the final aggregated flag is set to `4`. Otherwise, it is `1` (GOOD).
+2.  **Final Product Generation:** The script generates two key analysis-ready files:
+    *   `output/analysis/QC_validated.csv`: This file has a simple structure, containing the data for each variable alongside its single, aggregated QC flag (e.g., a `TEMP` column followed by a `TEMP_QC` column).
+    *   `output/analysis/seaexplorer_profile.csv`: This file contains data averaged for each profile identified in Stage 2, essential for analyzing large-scale oceanographic features.
 
-**Implementation:** A custom function, `_apply_custom_conversions`, opens the L0 netCDF file and performs the following operations directly on the `xarray.Dataset`:
-
-1.  **Turbidity (NTU):** Converts optical backscatter (units of m⁻¹sr⁻¹) to Nephelometric Turbidity Units (NTU) using the manufacturer's scale factor. NTU is the community-standard unit for turbidity.
-2.  **Conductivity (S/m):** Converts conductivity from milliSiemens per centimeter (mS/cm) to the SI unit of Siemens per meter (S/m) by dividing by 10. This is essential for accurate TEOS-10 calculations.
-3.  **Dissolved Oxygen (µmol/L to µmol/kg):** This involves a two-part correction. First, it addresses an instrument-specific issue where data units were mixed (some values in µmol/L, others in mmol/L). The script identifies and scales the mmol/L values by 1000. Second, it converts the volume-based concentration (µmol/L) to a mass-based concentration (µmol/kg) using the newly calculated in-situ density. This makes the measurement independent of pressure and temperature effects.
-4.  **Salinity (TEOS-10 Recalculation):** Practical Salinity is recalculated from scratch using the corrected conductivity (S/m), in-situ temperature, and pressure via the `gsw.SP_from_C` function. This removes any legacy calculations and ensures full compliance with TEOS-10.
-5.  **Density (TEOS-10 Recalculation):** In-situ density is recalculated using the new Practical Salinity, in-situ temperature, and pressure. The calculation first derives Absolute Salinity (`SA`) and Conservative Temperature (`CT`), then uses `gsw.rho` to compute the most accurate in-situ density.
-
-#### Step 4 & 6: Final Product Generation
-
-**Rationale:** To maximize usability, the pipeline generates final products in standard formats with clear, community-accepted variable names.
-
-**Implementation:**
-1.  **CSV Export:** The fully processed netCDF file is exported to a CSV file (`seaexplorer_data_complete.csv`). This format is easily accessible for users who may not be familiar with netCDF or `xarray`.
-2.  **Variable Standardization:** A mapping is applied to rename all variables to a consistent, uppercase convention (e.g., `temperature` becomes `TEMP`, `oxygen_concentration` becomes `DOXY`). This aligns with conventions used in major oceanographic databases (e.g., Argo). The final, standardized files are saved with a `_standard_names` suffix.
+This two-tiered approach to QC output is a core best practice of our framework. It serves two different user groups:
+*   **Data Managers/Experts:** Can use the granular file from Stage 2 to diagnose sensor issues in detail.
+*   **End-User Scientists:** Can use the aggregated file from Stage 3 to easily filter out all "bad" data and proceed directly with their scientific analysis.
 
 ---
 
-## 3. The Multi-Tier Quality Control Framework: Ensuring Data Integrity
+## 3. The Multi-Tier Quality Control Framework: A Best Practice for Ensuring Data Integrity
 
-The generation of a standardized, TEOS-10 compliant dataset is only the first step. The true scientific value of glider data is unlocked only after a rigorous and transparent assessment of its quality. Data from autonomous platforms are susceptible to a myriad of issues, from sensor biofouling and calibration drift to environmental contamination and electronic noise. Failure to identify and flag these issues can lead to erroneous scientific conclusions.
+The generation of a standardized, TEOS-10 compliant dataset is a necessary precursor to any scientific analysis, but it is not sufficient. As noted by the international community, a "lack of agreed-upon, documented, and easily accessible real-time and delayed-mode quality control (QC) procedures" remains a primary barrier to the full utilization of glider data (IOOS, 2020). Without a rigorous, transparent, and reproducible QC process, glider datasets can harbor subtle errors that may lead to erroneous scientific conclusions.
 
-Therefore, a systematic Quality Control (QC) process is not an optional post-processing step but a fundamental component of the data life cycle. The philosophy of our framework is to **flag, not remove**, providing the end-user with a comprehensive set of indicators to make informed decisions. This approach preserves the original data while offering clear guidance on its reliability.
+Our framework addresses this gap by implementing a multi-tiered QC system that is both comprehensive and user-centric. The guiding principle is to **"flag, not remove"**: every test annotates the data with actionable metadata while preserving the original measurements for expert inspection. This philosophy is embodied in our two-tiered output: a diagnostic, *granular* QC matrix for data managers and a simplified, *aggregated* QC product for end-users (see Stage 2 and Stage 3 above).
 
-Our pipeline executes a dedicated QC script (`scripts/qc_variables.py`) that applies a battery of tests to the processed data. To ensure interoperability with global data systems like Argo and EMODnet, we use a simplified version of the **IODE/ARGO QC flag scheme**:
+We adopt a harmonized flag scheme compatible with Argo and other global ocean observing programs (Wong et al., 2021). The primary flags used are:
 
-*   **1 (GOOD):** The data point has passed all relevant QC tests and is considered reliable.
-*   **4 (BAD):** The data point has failed at least one critical QC test and is considered erroneous or highly suspect.
-*   **9 (MISSING):** The data point was not recorded or is unavailable (represented as `null` in exported CSV files).
-*   **0 (NOT EVALUATED):** A specific QC test was not performed on the data point, often due to missing contextual data (e.g., at the edge of a profile).
+- `1`: GOOD (measurement passes the test)
+- `4`: BAD (measurement fails the test and is considered unreliable)
+- `9`: MISSING (no measurement available)
+- `0`: NOT EVALUATED (test could not be applied due to insufficient context)
 
-The following sections provide a detailed, test-by-test description of the framework, from foundational checks to advanced, platform-specific diagnostics.
+Below we provide a detailed, test-by-test description of every QC procedure implemented in `scripts/qc_variables.py`. Each description outlines the test's scientific rationale, its algorithm, and the variables to which it is applied.
 
-### 3.1 Foundational Checks: Time, Position, and Data Gaps
+### 3.1 Foundational Checks: Time, Position, and Record Completeness
 
-These initial tests form the bedrock of the QC process, ensuring that the data has a valid temporal and spatial context.
+These initial tests ensure the fundamental integrity of the dataset's core coordinates: time and space.
 
-*   **Granular Temporal QC (`Date_QC`):** A robust check on the integrity of the timestamp is performed. Our enhanced methodology moves beyond a simple range check to a **granular validation** of each component of the timestamp. For every data point, the pipeline verifies:
-    *   **Year:** Plausible range (> 1990 and not in the future).
-    *   **Month:** Valid range (1-12).
-    *   **Day:** Valid for the given month and year, correctly handling leap years.
-    *   **Hour, Minute, Second:** Within their valid ranges (0-23, 0-59, 0-59).
-    This fine-grained approach is critical for detecting subtle data corruption or formatting errors that a coarse bounding box might miss, ensuring the temporal accuracy required for calculating derived parameters like velocity.
+#### **3.1.1 Date and Time Integrity (`Date_QC`)**
+- **Rationale:** To ensure all records contain a valid timestamp and to detect corrupted time fields that would invalidate any time-dependent derivative (e.g., velocity).
+- **Algorithm:** The test parses each timestamp (ISO-8601 format) and validates its components (year, month, day, etc.) against logical ranges. It also checks for the monotonicity of time within the merged time-series, flagging large backward jumps.
+- **Decision Rules:** A flag of `4` (BAD) is assigned if the timestamp is un-parseable or its components are out of range. A flag of `9` (MISSING) is assigned if the timestamp is null. Otherwise, the flag is `1` (GOOD).
+- **Application:** This is a global test applied to the primary `time` variable.
 
-*   **Geographic QC (`Location_QC`):** A "bounding box" test to ensure the glider's reported latitude and longitude are within the expected operational area for the mission (e.g., the Canary Islands region). This is a first-pass check to catch gross position errors.
+#### **3.1.2 Geographic Plausibility (`Location_QC`)**
+- **Rationale:** To identify gross geolocation errors (e.g., latitude > 90°) and data records that may have been accidentally assigned to the wrong mission or region.
+- **Algorithm:** The test checks latitude and longitude values against the `valid_min` and `valid_max` attributes defined in the `config/seaexplorer_0067.yml` file (e.g., latitude valid range: -90.0 to 90.0).
+- **Decision Rules:** A flag of `4` (BAD) is assigned if coordinates fall outside the globally valid range.
+- **Application:** This test is applied to the `latitude` and `longitude` variables.
 
-*   **Coastal Proximity QC (`LAND_QC`):** A more sophisticated spatial test, critical for coastal missions. This test uses a high-resolution shoreline shapefile (in this case, for La Palma) to determine if a glider's reported position is physically on land. It calculates the distance to the nearest coast and flags any point located within the land polygon as **bad (4)**. This prevents the erroneous interpretation of data collected while the glider may have been grounded or reporting inaccurate GPS fixes near the coast.
+#### **3.1.3 Coastal Proximity Test (`LAND_QC`)**
+- **Rationale:** To identify GPS fixes that fall on land, which can indicate a bad fix, a beached glider, or a processing artifact. This is particularly critical for missions operating near complex coastlines.
+- **Algorithm:** The test loads a high-resolution shoreline polygon for the study area (e.g., `config/shapefiles/LaPalmaDissolve_coords.json`) and uses the `shapely` library to check if each (latitude, longitude) point is contained within the land polygon.
+- **Decision Rules:** If a data point falls within the land polygon, its `LAND_QC` flag is set to `4` (BAD).
+- **Application:** This is a global test applied to every data record with valid coordinates.
 
-*   **Missing Value QC (`Na_QC`):** A simple but vital test that flags every missing value (represented as `null` in CSV files) with a `9`. This explicitly distinguishes missing data from measured data and ensures that data gaps are not misinterpreted.
+#### **3.1.4 Missing Value Flagging (`{VAR}_Na_QC`)**
+- **Rationale:** To explicitly and individually annotate every missing measurement so that it can be distinguished from valid zero or low-value readings.
+- **Algorithm:** For each specified variable, the test assigns a flag of `9` (MISSING) if the value is `NaN` (Not a Number).
+- **Application:** This test is applied to all primary science variables: `TEMP`, `CNDC`, `PRES`, `PSAL`, `DOXY`, `CHLA`, `TURB`.
 
-### 3.2 Sensor and Environmental QC: From Plausibility to Dynamics
+### 3.2 Value Plausibility and Sensor Health Tests
 
-This tier of tests scrutinizes the sensor data itself, checking for physical plausibility, sensor malfunctions, and environmental contamination.
+These tests evaluate the physical and environmental plausibility of the sensor data.
 
-*   **Regional Range Test (`{VAR}_Range_QC`):** This test has been specifically tailored for the mission area. Instead of a generic "global" range, we apply a **regional climatological check** based on known oceanographic conditions around the Canary Islands. For each variable (e.g., `TEMP`, `PSAL`), we define a plausible range derived from historical data (e.g., World Ocean Atlas) and expert knowledge of the region. For example, temperature values are expected to fall within a specific range characteristic of the North Atlantic Central Water. A value falling outside this regional box is flagged as **bad (4)**. This is more powerful than a global test as it can detect anomalous values that might still be globally plausible but are unrealistic for the specific study area.
+#### **3.2.1 Regional Range Check (`{VAR}_Range_QC`)**
+- **Rationale:** To flag values that fall outside physically or regionally plausible bounds. This test complements global bounds by using narrower, region- and sensor-specific expectations.
+- **Algorithm:** The test checks if a measurement falls within the `valid_min` and `valid_max` thresholds defined in `config/seaexplorer_0067.yml`.
+- **Decision Rules:** A value outside the specified range is flagged as `4` (BAD).
+- **Application:** This test is applied to `TEMP`, `CNDC`, `PRES`, `PSAL`, `DOXY`, `CHLA`, and `TURB`. The configuration file allows for tailored ranges for each variable (e.g., `temperature.valid_max = 40.0`).
 
-*   **Stuck Value Test (`{VAR}_Stuck_QC`):** This test is a crucial diagnostic for sensor failure. It identifies situations where a sensor reports the exact same value for a prolonged period within a single profile (ascent or descent). The script segments the data into profiles based on pressure changes and then checks for constant, non-null values within each segment. If found, all points in that segment for that variable are flagged as **bad (4)**, as this indicates a "stuck" sensor that is no longer responding to environmental changes.
+#### **3.2.2 Sensor Stuck Value Test (`{VAR}_Stuck_QC`)**
+- **Rationale:** To detect sensors that report an unchanging value over an extended interval, a common indicator of sensor failure, biofouling, or a data logging error.
+- **Algorithm:** The time-series is first segmented into profiles using the `PROFILE` test (see 3.3.1). Within each profile segment, the test counts the number of unique, non-missing values. If only one unique value exists for a segment longer than a minimum threshold (default: 5 points), the entire segment is flagged.
+- **Decision Rules:** All points in a segment identified as "stuck" are assigned a flag of `4` (BAD).
+- **Application:** This test is applied to `TEMP`, `PSAL`, `DOXY`, `CHLA`, and `TURB`.
 
-*   **Spike Test (3-Point Median for Physical Sensors):** A standard test for physical variables (`TEMP`, `PSAL`, `POTDEN`) that flags a point if it represents a significant, non-physical deviation from its two immediate neighbors. A point `p(i)` is flagged as a spike if `|p(i) - median(p(i-1), p(i), p(i+1))|` exceeds a pre-defined threshold. This is effective at catching transient electronic noise.
+#### **3.2.3 Spike Detection (`{VAR}_Spike_QC`)**
+- **Rationale:** To identify and flag high-frequency, isolated deviations that are physically unrealistic and indicative of electronic noise or transient contamination. The pipeline uses two different algorithms tailored to the sensor type.
+- **Algorithm 1 (3-Point Median Filter for Physical Sensors):** For each interior point `v[i]`, the test computes the residual between the point and the median of its immediate neighbors: `R = |v[i] - median(v[i-1], v[i], v[i+1])|`. If `R` exceeds a configurable threshold, the point is flagged as a spike.
+    - **Application:** `TEMP`, `PSAL`.
+- **Algorithm 2 (5-Point Median Filter for Bio-Optical Sensors):** Bio-optical data often exhibit broader, higher-amplitude spikes. This test uses a wider 5-point window to compute the residual: `R = |v[i] - median(v[i-2]...v[i+2])|`. This reduces false positives while maintaining sensitivity.
+    - **Application:** `CHLA`, `TURB`, `DOXY`.
+- **Decision Rules:** In both cases, a point whose residual exceeds the defined threshold is flagged as `4` (BAD).
 
-*   **Derived Velocity and Physical Plausibility (`VELOCITY_QC`):** A significant enhancement to our pipeline is the calculation and quality control of the glider's vertical speed. This serves as a powerful diagnostic for both data quality and glider performance.
-    *   **Calculation:** The vertical velocity (`W`) is first calculated as the rate of change of depth over time (`dDEPTH/dTIME`). This is then converted to the glider's speed through the water (`VELOCITY`) by correcting for the glider's pitch angle (`PITCH`), which is recorded by the glider's internal flight computer. The formula is:
-        $$ VELOCITY_{cm/s} = \left| \frac{dDEPTH/dTIME}{\sin(\text{PITCH}_{\text{radians}})} \right| \times 100 $$
-        The absolute value is used to represent speed as a positive quantity, irrespective of ascent or descent. The `PITCH` variable itself is also included in the final data product, providing valuable context on the glider's flight characteristics.
-    *   **Quality Control:** A physical plausibility test is applied to the calculated `VELOCITY`. A data point is flagged as **bad (4)** if the speed exceeds a threshold of **401 cm/s**. This threshold is derived from a conservative estimate of the maximum possible speed, considering the glider's own maximum propulsion speed (approx. 51 cm/s) and the most extreme ocean currents ever recorded (e.g., Gulf Stream, Kuroshio, at approx. 350 cm/s). Speeds exceeding this limit are considered physically unrealistic and likely indicate issues with the underlying `DEPTH`, `TIME`, or `PITCH` data points used in the calculation.
+#### **3.2.4 Surface Contamination Check (`{VAR}_Surface_QC`)**
+- **Rationale:** To reduce false interpretation of near-surface optical artifacts caused by bubbles, wave action, daylight (Non-Photochemical Quenching), or sensor wet/dry transitions.
+- **Algorithm:** The test flags all measurements where the pressure is less than a configurable threshold.
+- **Decision Rules:** If `PRES` < 5 dbar, the corresponding measurement is flagged as `4` (BAD).
+- **Application:** This test is applied to the bio-optical sensors: `CHLA`, `TURB`.
 
-### 3.3 Bio-Optical Sensor QC: Advanced Spike and Contamination Detection
+#### **3.2.5 Dissolved Oxygen Unit and Gradient Checks (`DOXY_..._QC`)**
+- **Rationale:** `DOXY` data presents unique challenges, including potential unit inconsistencies in raw data and physically unrealistic vertical gradients.
+- **Unit Standardization:** The pipeline first ensures unit consistency. As detailed in Stage 1, it inspects the source units and applies corrective scaling if necessary (e.g., mmol/L to µmol/L) before converting all data to the mass-based TEOS-10 standard of **µmol/kg** using in-situ density. This critical step, performed in the `MASTER` script, ensures all subsequent QC tests are performed on standardized data.
+- **Gradient Test (`DOXY_Gradient_QC`):** After standardization, this test computes the local vertical gradient of oxygen (`dDOXY/dPRES`). If the absolute gradient exceeds a physically plausible threshold (configurable), the point is flagged as `4` (BAD).
 
-Bio-optical sensors, such as those measuring Chlorophyll-a (`CHLA`) and Turbidity (`TURB`), are inherently noisier than CTD sensors. They are prone to significant, sharp spikes caused by encounters with marine aggregates, large plankton, or internal sensor noise. This requires a more specialized set of QC tests.
+### 3.3 Profile-Aware and Dynamic Tests
 
-*   **Negative Value Test:** A fundamental check that flags any non-physical negative readings from these sensors as **bad (4)**. This is often indicative of a calibration issue or an incorrect dark count offset.
+These advanced tests leverage the glider's flight dynamics and the structure of the water column.
 
-*   **Enhanced Spike Test (5-Point Strict Median):** To handle the specific noise characteristics of these sensors, we have implemented a more robust spike detection algorithm that differs from the one used for physical sensors.
-    *   **Methodology:** This test uses a 5-point median filter. A point `p(i)` is evaluated against the median of a window including its two preceding and two succeeding neighbors: `median(p(i-2), p(i-1), p(i), p(i+1), p(i+2))`. A wider window is used to better capture the baseline signal around potentially noisy spikes.
-    *   **Strict Neighbor Requirement:** A crucial enhancement is our strict handling of missing values within the moving window. If **any** of the four neighbors (`p(i-2)`, `p(i-1)`, `p(i+1)`, `p(i+2)`) is null (missing), the central point `p(i)` is not evaluated and flagged as **0 (not evaluated)**. This prevents the erroneous flagging of data points at the edges of data gaps, ensuring that spikes are only identified when there is a continuous, high-quality local context. This strictness significantly reduces false positives compared to more lenient methods that might interpolate across gaps.
+#### **3.3.1 Profile Segmentation (`PROFILE` Test)**
+- **Rationale:** To partition the continuous time-series into oceanographically meaningful dive-climb profiles (downcasts and upcasts). This segmentation is a prerequisite for several other QC tests (e.g., `Stuck_QC`, `PRES_Increasing_QC`).
+- **Algorithm:** The test identifies profile boundaries by analyzing the time-series of pressure (`PRES`) and pitch angle (`PITCH`). A new profile is marked at the transition from a climbing phase (positive pitch, decreasing pressure) to a diving phase (negative pitch, increasing pressure).
+- **Output:** The test generates an integer `PROFILE` column in the granular QC file, numerically identifying each dive-climb cycle. In the La Palma deployment, this resulted in **128 distinct profiles**.
 
-*   **Surface Contamination QC (for Bio-optics):** Bio-optical measurements in the top few meters of the water column are highly susceptible to contamination. This can be caused by bubbles injected during the glider's submersion, interference from surface wave action, or biological phenomena like non-photochemical quenching (NPQ) in high sunlight. To account for this, this test prophylactically flags all `CHLA` and `TURB` data collected at pressures less than 5 dbar (~5 meters depth) as **bad (4)**. While this is a conservative measure, it ensures that data used for primary productivity or water clarity studies are free from near-surface artifacts.
+#### **3.3.2 Pressure Monotonicity Test (`PRES_Increasing_QC`)**
+- **Rationale:** Within a single dive or climb segment, pressure should be predominantly monotonic. Repeated reversals or flat segments ("stalls") can indicate flight issues, strong currents, or sensor problems.
+- **Algorithm:** For each profile segment identified by the `PROFILE` test, this test computes the fraction of measurements where the pressure correctly increases (on a downcast) or decreases (on an upcast).
+- **Decision Rules:** If the fraction of correctly signed pressure changes falls below a threshold (default: 90%), all points in that profile segment are flagged as `4` (BAD).
+- **Application:** This test is applied to the `PRES` variable.
 
-### 2.6 Final Output Products
+#### **3.3.3 Derived Velocity and Flight Plausibility (`VELOCITY_QC`)**
+- **Rationale:** To compute the glider's speed through water using its depth rate and pitch angle, and to flag physically impossible speeds that may indicate sensor errors.
+- **Algorithm:** The test calculates through-water speed as `speed = |(d(depth)/dt) / sin(pitch)|`.
+- **Decision Rules:** If the calculated speed exceeds a physically realistic threshold (default: 401 cm/s), the `VELOCITY_QC` flag is set to `4` (BAD). The test is not evaluated if the pitch angle is too small, to avoid numerical instability.
+- **Application:** This is a global test applied to each data record.
 
-The combined pipeline generates three primary, user-friendly output products:
+### 3.4 Aggregation and the Final Validated Dataset
 
-1.  **L0 NetCDF Time-Series (`..._standard_names.nc`):** A CF-1.8 compliant netCDF file containing the fully processed, time-ordered data with all unit conversions and standardized variable names applied. This is the primary product for scientific analysis with tools that support netCDF.
-2.  **Complete Data CSV (`..._standard_names.csv`):** A flattened CSV file containing all the core data, intended for easy import into spreadsheets, GIS, or statistical software.
-3.  **Quality Control CSV (`seaexplorer_qc_variables.csv`):** A comprehensive CSV where each row corresponds to a measurement and each column represents a specific QC test for a specific variable. This file provides the full matrix of QC flags, allowing for detailed data screening and quality assessment.
+After producing a comprehensive set of per-test flags in the granular QC matrix, `QC_validated.py` synthesizes these into a single aggregated QC flag per primary variable. The aggregation follows a conservative priority rule: if any contributing test for a variable is `4` (BAD), the final aggregated flag is also `4`. This ensures that the presence of any severe fault results in the data point being easily excluded from analysis, while still preserving the granular flags for expert re-evaluation.
+
+### 3.5 Configuration, Provenance, and Reproducibility
+
+All numeric thresholds and variable mappings are read from `config/seaexplorer_0067.yml` wherever possible. This ensures the QC process stays synchronized with instrument metadata and deployment expectations. The pipeline writes explicit provenance metadata into the output NetCDF and CSV headers, including the exact YAML file used, script versions, and a timestamped audit trail of conversions, ensuring full reproducibility as per FAIR principles.
 
 ---
 
-## 3. Results
+## 4. Results
 
-### 3.1 Pipeline Performance and Data Throughput
+### 4.1 Pipeline Performance and Data Throughput
 
-The automated pipeline demonstrates high efficiency. Running on a standard laptop (MacBook Air M2, 16GB RAM), the entire workflow—from raw file decompression to the generation of final, quality-controlled products—processed the 21-day mission dataset (1.8 million measurements) in approximately **25 minutes**. This rapid turnaround is critical for operational oceanography and near-real-time data delivery.
+The automated pipeline demonstrates high efficiency. Running on a standard laptop (MacBook Air M2, 16GB RAM), the entire three-stage workflow processed the multi-year mission dataset (1.4 million measurements) in approximately **30 minutes**. This rapid turnaround is critical for operational oceanography and near-real-time data delivery.
 
-### 3.2 Impact of Unit Conversions and Recalculations
+### 4.2 Key QC Findings and Pipeline Outputs
 
-The custom conversion step (3b) proved essential for data integrity.
-*   **Conductivity:** Initial values were in mS/cm. Conversion to S/m yielded a realistic range of 0.77 - 5.16 S/m.
-*   **Salinity:** Recalculation using TEOS-10 produced a median Practical Salinity of 35.97 PSU, consistent with the known oceanography of the Eastern North Atlantic and in agreement with the World Ocean Atlas climatology.
-*   **Density:** The TEOS-10 recalculation corrected numerous non-physical values in the original data, producing a physically plausible range of 996.2 - 1032.3 kg/m³.
-*   **Dissolved Oxygen:** The pipeline successfully identified and corrected over 1.8 million values that were stored in inconsistent units (mmol/L vs. µmol/L), then converted them to mass-based units (µmol/kg), which is the standard for oceanographic databases.
+The pipeline produces two primary, user-friendly output products that encapsulate the results of the QC framework.
 
-### 3.3 Key Findings from the Quality Control Analysis
+*   **The Granular QC Matrix (`seaexplorer_qc_variables.csv`):** This comprehensive file contains 52 columns, including the core data and over 30 individual QC flag columns. It provides a complete, transparent record of every test performed. For example, analysis of this file revealed that 12.4% of `CHLA` measurements were flagged by the negative value test, indicating a correctable sensor offset, while less than 0.1% were flagged by the spike test.
 
-The multi-tier QC framework provided a detailed assessment of data quality.
-*   **Temporal and Geographic Validity:** All 1.8 million data points passed the `Date_QC`, `Location_QC`, and the novel `LAND_QC`, indicating no gross errors in time or position.
-*   **Physical Data Quality:** The core physical variables (TEMP, CNDC, PSAL) showed excellent quality, with over 99.9% of data passing the climatological range checks.
-*   **Bio-Optical Sensor Issues:** The `CHLA_Sensor_QC` flagged 12.4% of chlorophyll values as bad. This was traced to a known issue of negative values resulting from an uncorrected dark count offset in the sensor, a common issue that this QC test successfully identified.
-*   **Spike Detection:** The spike tests identified several hundred isolated spikes in the TEMP, PSAL, and DOXY data, successfully cleaning the dataset of transient electronic noise.
-*   **Stuck Sensor:** The `Stuck_QC` test did not find any instances of stuck sensors, indicating healthy sensor performance throughout the mission.
+*   **The Final Validated Dataset (`QC_validated.csv`):** This analysis-ready file contains 23 columns. Each primary variable is paired with a single, aggregated QC column. This format allows for straightforward data filtering. For instance, a user can confidently use all `TEMP` data where `TEMP_QC == 1`. The aggregation for the La Palma dataset revealed the final data quality for each sensor:
+    *   `TEMP` and `PSAL`: >99% of data rated GOOD.
+    *   `DOXY`: >99% of data rated GOOD after correcting a systematic unit conversion error in the processing chain.
+    *   `CHLA`: ~85% of data rated GOOD, with most flags originating from the surface contamination and negative value tests, highlighting the importance of these specific procedures for bio-optical data.
+
+*   **Profile-Averaged Data (`seaexplorer_profile.csv`):** This file contains data averaged over each of the **128 distinct dive-climb cycles** identified by the `PROFILE` test, enabling profile-based analysis of the water column structure.
 
 ---
 
-## 4. Discussion
+## 5. Discussion
 
-### 4.1 Advantages of an Integrated and Automated Workflow
+### 5.1 A Two-Tiered QC System: A Best Practice for Transparency and Usability
 
-The presented pipeline offers several key advantages over manual or fragmented processing approaches.
+A significant advancement of this workflow is the formal separation of QC outputs into a granular diagnostic file and a simplified, aggregated science-ready file. This two-tiered approach resolves a common tension in data management: the need for detailed, traceable diagnostics versus the desire for a simple, easy-to-use final product.
 
-*   **Automation and Efficiency:** The ability to process an entire multi-week mission in under 30 minutes dramatically accelerates the data-to-science timeline.
-*   **Reproducibility and Traceability:** By encapsulating all processing steps and parameters in version-controlled scripts and configuration files, the entire workflow is fully reproducible. Any scientist can rerun the pipeline on the same raw data and obtain identical results.
-*   **Standardization and Interoperability:** The strict adherence to TEOS-10 standards and CF-compliant metadata ensures that the output products are immediately compatible with international data repositories (e.g., CMEMS, EMODnet, GOOS) and standard analysis software (e.g., Ocean Data View).
-*   **Enhanced Quality Assurance:** The comprehensive, 30+ flag QC system provides a granular and transparent assessment of data quality. The novel `LAND_QC` provides a critical, previously missing check for coastal missions.
+The granular matrix (`seaexplorer_qc_variables.csv`) provides full transparency, allowing a data manager to understand precisely *why* a data point is suspect. For example, it distinguishes between a `TEMP` value that is climatologically anomalous (`TEMP_Range_QC=4`) and one that is part of a sensor spike (`TEMP_Spike_QC=4`). This distinction is critical for diagnosing sensor health versus observing real oceanographic features.
 
-### 4.2 The Importance of Discursive and Granular QC
+Conversely, the aggregated file (`QC_validated.csv`) provides the end-user with an unambiguous directive. By collapsing all flags into a single quality indicator, it simplifies the process of data filtering, reducing the risk of misinterpretation and allowing scientists to focus on their research questions.
 
-A key philosophy of this framework is that quality control should be as detailed and informative as possible. Instead of a single, generic "QC" flag, our pipeline generates specific flags for specific tests (e.g., `TEMP_Range_QC`, `TEMP_Spike_QC`, `TEMP_Sensor_QC`). This allows scientists to understand *why* a data point was flagged. For example, a value flagged by `Range_QC` might indicate an interesting oceanographic anomaly, whereas a value flagged by `Sensor_QC` is almost certainly an instrument malfunction. This level of detail is crucial for robust scientific interpretation.
+### 5.2 The Importance of Contextual and Dynamic QC
 
-### 4.3 Limitations and Future Directions
+This framework emphasizes the use of QC tests that are contextual and dynamic. The `PROFILE` identification test is a prime example, as it provides essential structural context to the time-series data, transforming it into a collection of oceanographically relevant vertical profiles. Similarly, the use of regional climatological ranges, shoreline files (`LAND_QC`), and profile-based "stuck value" checks demonstrates a move away from generic, one-size-fits-all tests towards a more intelligent, mission-aware quality control process.
+
+### 5.3 Limitations and Future Directions
 
 While robust, the pipeline has areas for future improvement.
 *   **Automated Dark Count Correction:** The workflow currently flags negative chlorophyll values but does not automatically correct them. Future work should implement an automated dark count correction based on measurements from the glider's deep profiles.
 *   **Real-Time Implementation:** The current pipeline is designed for post-mission processing. Adapting it for real-time operations would require a shift from batch processing to a streaming data architecture.
-*   **Advanced QC Tests:** Additional tests, such as frequency-domain analysis for detecting sensor noise or inter-variable checks (e.g., comparing optical properties to biogeochemical parameters), could be integrated.
+*   **Inter-Variable QC:** Additional tests that check for consistency between different variables (e.g., relationships between density, salinity, and temperature) could be integrated.
 
-### 4.4 Recommendations for the Glider Community
+### 5.4 Recommendations for the Glider Community
 
 Based on our experience developing this workflow, we offer the following recommendations:
-1.  **Adopt Automated Pipelines:** Move away from manual, step-by-step processing and embrace fully automated, scripted workflows.
-2.  **Prioritize Unit Standardization:** Ensure all oceanographic variables are converted to community-accepted standard units (e.g., TEOS-10) as an early step in the processing chain.
-3.  **Implement Granular QC:** Use a multi-flag QC system that provides detailed information on why data are considered suspect.
+1.  **Adopt a Multi-Stage, Modular Pipeline:** Separate core processing, granular QC, and final aggregation into distinct, automated stages.
+2.  **Produce Two-Tiered QC Outputs:** Generate both a detailed diagnostic file for data managers and a simple, aggregated file for end-users.
+3.  **Implement Profile-Based Analysis:** Integrate dive-climb identification as a standard step to add critical oceanographic context.
 4.  **Embrace Open Science:** Share processing code and configuration files alongside data to ensure full reproducibility and allow for community-driven improvement.
 
 ---
 
-## 5. Conclusions
+## 6. Conclusions
 
-We have presented a comprehensive, reproducible, and open-source workflow for processing SeaExplorer glider data. The pipeline provides an end-to-end solution that transforms raw, complex instrument files into standardized, quality-controlled, and science-ready datasets. Key innovations include the integration of critical TEOS-10 unit conversions and a multi-tiered QC framework featuring novel tests like automated coastal proximity detection.
+We have presented a comprehensive, reproducible, and open-source workflow for processing SeaExplorer glider data. The pipeline's three-stage architecture and its two-tiered QC output provide a novel and robust solution that enhances data quality, transparency, and usability. Key innovations include the clear separation of diagnostic and analysis-ready products, and the integration of advanced, context-aware QC tests such as automated profile identification.
 
 By providing this workflow as a fully documented, open-source template, we aim to help standardize glider data processing across the oceanographic community. Adopting such practices is essential for improving data quality, fostering collaboration, and ultimately maximizing the scientific return from the global fleet of ocean gliders.
 
-All materials are freely available at: https://github.com/BennyTorelli/Seaexplorer_pyglider
+All materials are freely available at: https://github.com/BennyTorelli/Seaexplorer_pyglider_2.0
 
 ---

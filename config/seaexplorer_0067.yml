@@ -217,11 +217,9 @@ netcdf_variables:
     standard_name: mole_concentration_of_dissolved_molecular_oxygen_in_sea_water
     units:        umol l-1
     coordinates:   time depth latitude longitude
-    coarsen:      8
-    # Apply salinity-based correction when available
-    # Use integer 1 instead of bare boolean so NetCDF attribute types are compatible
-    correct_oxygen: 1
-    reference_salinity: 35.0
+    # DISABILITATO correct_oxygen: faremo noi la conversione con densità corretta nel MASTER
+    # correct_oxygen: 1
+    # reference_salinity: 35.0
 
   temperature_oxygen:
     source:  LEGATO_CODA_TEMPERATURE
@@ -229,7 +227,7 @@ netcdf_variables:
     standard_name: temperature_of_sensor_for_oxygen_in_sea_water
     units:        Celsius
     coordinates:   time depth latitude longitude
-    coarsen:      8
+    # RIMOSSO coarsen: mantieni tutti i dati del sensore
 
 # derived water speed:
   # water_velocity_eastward:
